@@ -5,13 +5,27 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { db, defaultReferenceData, defaultRuleData, parseJson, toBusinessDto, toInvoiceDto, toUserDto } from "./db.js";
 import { newSessionId, requireAuth, requireBusinessAdmin, requireDeveloper, signAccessToken, signRefreshToken } from "./auth.js";
+import { requireLicense, validateLicense } from "./license.js";
+import { checkForUpdate, getPendingMandatoryUpdate, requestUpdate } from "./updates.js";
 import { asyncHandler, normalizeStringList, now, paginate } from "./utils.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 4000);
-const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:5173";
+const CORS_ORIGINS = String(process.env.CORS_ORIGIN || "http://localhost:5173")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const APP_VERSION = process.env.APP_VERSION || "0.0.0";
 
-app.use(cors({ origin: CORS_ORIGIN, credentials: true }));
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || CORS_ORIGINS.includes("*") || CORS_ORIGINS.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error("Origin is not allowed"));
+  },
+  credentials: true,
+}));
 app.use(express.json({ limit: "2mb" }));
 
 const userSelect = `
@@ -38,8 +52,25 @@ const normalizeRuleData = (value = {}) => ({
 });
 
 app.get("/api/health", (req, res) => {
-  res.json({ ok: true, app: "TexTradeOSBackend" });
+  const license = validateLicense();
+  res.json({
+    ok: true,
+    app: "TexTradeOSBackend",
+    version: APP_VERSION,
+    license: { allowed: license.allowed, code: license.code },
+  });
 });
+
+app.get("/api/version", (req, res) => {
+  res.json({ version: APP_VERSION });
+});
+
+app.get("/api/license/status", (req, res) => {
+  const result = validateLicense();
+  res.status(result.allowed ? 200 : 403).json(result);
+});
+
+app.use("/api", requireLicense);
 
 app.post("/api/auth/login", asyncHandler(async (req, res) => {
   const username = String(req.body?.username || "").trim();
@@ -134,6 +165,24 @@ app.post("/api/auth/refresh", (req, res) => {
   } catch {
     res.status(401).json({ message: "Invalid refresh token" });
   }
+});
+
+app.get("/api/updates/status", requireAuth, asyncHandler(async (req, res) => {
+  res.json(await checkForUpdate());
+}));
+
+app.post("/api/updates/install", requireAuth, requireBusinessAdmin, asyncHandler(async (req, res) => {
+  res.status(202).json(await requestUpdate());
+}));
+
+app.use("/api", (req, res, next) => {
+  const update = getPendingMandatoryUpdate();
+  if (!update) return next();
+  return res.status(503).json({
+    code: "MANDATORY_UPDATE_REQUIRED",
+    message: `TexTradeOS ${update.version} must be installed before continuing.`,
+    update,
+  });
 });
 
 app.get("/api/users", requireAuth, requireDeveloper, (req, res) => {
@@ -497,7 +546,7 @@ app.post("/api/invoices", requireAuth, (req, res) => {
     return toInvoiceDto(invoice, normalizedArticles.map((article, index) => ({ ...article, _id: String(index + 1) })));
   });
 
-  res.status(201).json({ success: true, data: createInvoice() });
+  res.status(201).json({ success: true, data: createInvoice.immediate() });
 });
 
 function filterUsers(rows, query) {

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "version": "1.0.0",
+  "mandatory": false,
+  "publishedAt": "2026-06-12T00:00:00.000Z",
+  "releaseUrl": "https://github.com/Spark-Pair/TexTradeOS-PRO-Backend/releases/tag/v1.0.0",
+  "notes": "Initial Docker release.",
+  "minimumLauncherVersion": "1.0.0",
+  "frontendImage": "ghcr.io/spark-pair/textradeos-frontend@sha256:replace",
+  "backendImage": "ghcr.io/spark-pair/textradeos-backend@sha256:replace",
+  "frontendCommit": "replace",
+  "backendCommit": "replace"
+}

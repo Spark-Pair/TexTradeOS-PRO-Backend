@@ -1,0 +1,166 @@
+name: Publish TexTradeOS Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic version without v prefix
+        required: true
+        type: string
+      frontend_ref:
+        description: Exact frontend branch, tag, or commit
+        required: true
+        default: master
+        type: string
+      mandatory:
+        description: Require clients to install this release
+        required: true
+        default: false
+        type: boolean
+      notes:
+        description: Release notes shown inside TexTradeOS
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    outputs:
+      frontend_digest: ${{ steps.frontend_image.outputs.digest }}
+      backend_digest: ${{ steps.backend_image.outputs.digest }}
+      frontend_commit: ${{ steps.commits.outputs.frontend }}
+      backend_commit: ${{ steps.commits.outputs.backend }}
+    steps:
+      - name: Validate version
+        shell: bash
+        run: |
+          [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+
+      - name: Checkout backend
+        uses: actions/checkout@v4
+        with:
+          path: backend
+
+      - name: Checkout frontend
+        uses: actions/checkout@v4
+        with:
+          repository: Spark-Pair/TexTradeOS-PRO
+          ref: ${{ inputs.frontend_ref }}
+          path: frontend
+          token: ${{ secrets.FRONTEND_REPO_TOKEN || github.token }}
+
+      - name: Capture commits
+        id: commits
+        shell: bash
+        run: |
+          echo "backend=$(git -C backend rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "frontend=$(git -C frontend rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish backend
+        id: backend_image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          push: true
+          tags: |
+            ghcr.io/spark-pair/textradeos-backend:${{ inputs.version }}
+            ghcr.io/spark-pair/textradeos-backend:latest
+
+      - name: Build and publish frontend
+        id: frontend_image
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          push: true
+          tags: |
+            ghcr.io/spark-pair/textradeos-frontend:${{ inputs.version }}
+            ghcr.io/spark-pair/textradeos-frontend:latest
+
+  windows_artifacts:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Publish launcher
+        shell: pwsh
+        run: |
+          dotnet publish launcher/TexTradeOS.Launcher/TexTradeOS.Launcher.csproj `
+            -c Release -r win-x64 --self-contained true `
+            -p:Version=${{ inputs.version }} `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o artifacts/launcher
+          Remove-Item artifacts/launcher/TexTradeOS.pdb -Force -ErrorAction SilentlyContinue
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer and checksums
+        shell: pwsh
+        env:
+          TEXTRADEOS_VERSION: ${{ inputs.version }}
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer/TexTradeOS.iss
+          Compress-Archive -Path artifacts/launcher/* -DestinationPath "artifacts/TexTradeOS-Portable-${{ inputs.version }}.zip"
+          Get-FileHash artifacts/installer/*.exe, artifacts/*.zip -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $([IO.Path]::GetFileName($_.Path))" } |
+            Set-Content artifacts/checksums.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: |
+            artifacts/installer/*.exe
+            artifacts/*.zip
+            artifacts/checksums.txt
+            INSTALLATION.md
+
+  release:
+    needs: [images, windows_artifacts]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: artifacts/windows
+
+      - name: Create release metadata
+        env:
+          VERSION: ${{ inputs.version }}
+          MANDATORY: ${{ inputs.mandatory }}
+          RELEASE_URL: https://github.com/Spark-Pair/TexTradeOS-Releases/releases/tag/v${{ inputs.version }}
+          RELEASE_NOTES: ${{ inputs.notes }}
+          FRONTEND_IMAGE: ghcr.io/spark-pair/textradeos-frontend@${{ needs.images.outputs.frontend_digest }}
+          BACKEND_IMAGE: ghcr.io/spark-pair/textradeos-backend@${{ needs.images.outputs.backend_digest }}
+          FRONTEND_COMMIT: ${{ needs.images.outputs.frontend_commit }}
+          BACKEND_COMMIT: ${{ needs.images.outputs.backend_commit }}
+        run: node scripts/createUpdateMetadata.mjs
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+        shell: bash
+        run: |
+          mapfile -t assets < <(find artifacts/windows -type f)
+          gh release create "v${{ inputs.version }}" \
+            --repo "Spark-Pair/TexTradeOS-Releases" \
+            --title "TexTradeOS ${{ inputs.version }}" \
+            --notes "${{ inputs.notes }}" \
+            artifacts/release/update.json \
+            "${assets[@]}"

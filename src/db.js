@@ -1,14 +1,17 @@
 import Database from "better-sqlite3";
 import bcrypt from "bcryptjs";
+import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = path.resolve(__dirname, "..", "textradeos.sqlite");
+const dbPath = path.resolve(
+  process.env.DATABASE_PATH || path.resolve(process.cwd(), "textradeos.sqlite")
+);
+fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
 export const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
+db.pragma("busy_timeout = 10000");
+db.pragma("synchronous = NORMAL");
 
 const now = () => new Date().toISOString();
 const json = (value) => JSON.stringify(value ?? {});

@@ -1,0 +1,355 @@
+using System.Diagnostics;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
+using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+
+namespace TexTradeOS.Launcher;
+
+internal sealed class DeploymentService
+{
+    internal static readonly string Home =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "TexTradeOS");
+    internal static readonly string DataDirectory = Path.Combine(Home, "data");
+    internal static readonly string BackupDirectory = Path.Combine(Home, "backups");
+    internal static readonly string LicenseDirectory = Path.Combine(Home, "license");
+    internal static readonly string ConfigDirectory = Path.Combine(Home, "config");
+    internal static readonly string ComposePath = Path.Combine(Home, "docker-compose.yml");
+    internal static readonly string EnvironmentPath = Path.Combine(ConfigDirectory, ".env");
+    internal static readonly string LicensePath = Path.Combine(LicenseDirectory, "license.json");
+    internal static readonly string FingerprintPath = Path.Combine(LicenseDirectory, "fingerprint.json");
+    internal static readonly string UpdateRequestPath = Path.Combine(DataDirectory, "update-request.json");
+    internal const string MetadataUrl =
+        "https://github.com/Spark-Pair/TexTradeOS-Releases/releases/latest/download/update.json";
+
+    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(15) };
+
+    internal void EnsureLayout(FingerprintDocument fingerprint)
+    {
+        Directory.CreateDirectory(Home);
+        Directory.CreateDirectory(DataDirectory);
+        Directory.CreateDirectory(BackupDirectory);
+        Directory.CreateDirectory(LicenseDirectory);
+        Directory.CreateDirectory(ConfigDirectory);
+
+        using (var stream = Assembly.GetExecutingAssembly()
+                   .GetManifestResourceStream("TexTradeOS.Launcher.docker-compose.yml")
+               ?? throw new InvalidOperationException("The embedded Docker Compose template is missing."))
+        using (var reader = new StreamReader(stream))
+            File.WriteAllText(ComposePath, reader.ReadToEnd());
+
+        File.WriteAllText(FingerprintPath, JsonSerializer.Serialize(fingerprint, JsonOptions.Default));
+        if (!File.Exists(EnvironmentPath))
+        {
+            var secret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
+            var refreshSecret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
+            File.WriteAllText(EnvironmentPath, $"""
+TEXTRADEOS_HOME=C:/ProgramData/TexTradeOS
+APP_PORT=8080
+APP_VERSION=0.0.0
+FRONTEND_IMAGE=ghcr.io/spark-pair/textradeos-frontend:latest
+BACKEND_IMAGE=ghcr.io/spark-pair/textradeos-backend:latest
+CORS_ORIGIN=*
+JWT_SECRET={secret}
+JWT_REFRESH_SECRET={refreshSecret}
+""");
+        }
+    }
+
+    internal async Task<bool> EnsureDockerAsync(Action<string> log)
+    {
+        if ((await RunAsync("docker", "info", log, false)).ExitCode == 0) return true;
+        var desktop = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+            "Docker", "Docker", "Docker Desktop.exe");
+        if (!File.Exists(desktop)) return false;
+        Process.Start(new ProcessStartInfo(desktop) { UseShellExecute = true });
+        for (var attempt = 0; attempt < 60; attempt++)
+        {
+            await Task.Delay(2000);
+            if ((await RunAsync("docker", "info", log, false)).ExitCode == 0) return true;
+        }
+        return false;
+    }
+
+    internal async Task StartAsync(Action<string> log)
+    {
+        var result = await ComposeAsync("up -d --remove-orphans", log);
+        if (result.ExitCode != 0) throw new InvalidOperationException("Docker Compose could not start TexTradeOS.");
+        if (!await WaitForHealthAsync(TimeSpan.FromMinutes(2)))
+            throw new TimeoutException("TexTradeOS did not become healthy.");
+    }
+
+    internal async Task StopAsync(Action<string> log)
+    {
+        var result = await ComposeAsync("down", log);
+        if (result.ExitCode != 0) throw new InvalidOperationException("Docker Compose could not stop TexTradeOS.");
+    }
+
+    internal async Task<string> BackupAsync(Action<string> log)
+    {
+        Directory.CreateDirectory(BackupDirectory);
+        var temporaryName = $".launcher-backup-{Guid.NewGuid():N}.sqlite";
+        var temporaryContainerPath = $"/data/{temporaryName}";
+        var temporaryHostPath = Path.Combine(DataDirectory, temporaryName);
+        var script =
+            $"const Database=require('better-sqlite3');(async()=>{{const db=new Database('/data/textradeos.sqlite');await db.backup('{temporaryContainerPath}');db.close()}})().catch(error=>{{console.error(error);process.exit(1)}})";
+        var result = await RunAsync(
+            "docker",
+            $"exec textradeos-backend node -e {Quote(script)}",
+            log);
+        if (result.ExitCode != 0)
+            throw new InvalidOperationException("SQLite could not create a consistent backup.");
+        try
+        {
+            var backupPath = Path.Combine(BackupDirectory,
+                $"textradeos-{DateTime.Now:yyyyMMdd-HHmmss}.sqlite");
+            File.Move(temporaryHostPath, backupPath);
+            PruneBackups();
+            return backupPath;
+        }
+        finally
+        {
+            File.Delete(temporaryHostPath);
+        }
+    }
+
+    internal async Task RestoreAsync(string backupPath, Action<string> log)
+    {
+        if (!File.Exists(backupPath))
+            throw new FileNotFoundException("The selected backup does not exist.", backupPath);
+        await ValidateBackupAsync(backupPath, log);
+        await StopAsync(log);
+        try
+        {
+            File.Copy(backupPath, Path.Combine(DataDirectory, "textradeos.sqlite"), true);
+            DeleteWalFiles();
+        }
+        finally
+        {
+            await StartAsync(log);
+        }
+    }
+
+    private async Task ValidateBackupAsync(string backupPath, Action<string> log)
+    {
+        var temporaryName = $".launcher-validate-{Guid.NewGuid():N}.sqlite";
+        var temporaryHostPath = Path.Combine(DataDirectory, temporaryName);
+        File.Copy(backupPath, temporaryHostPath, true);
+        try
+        {
+            var script =
+                $"const Database=require('better-sqlite3');const db=new Database('/data/{temporaryName}',{{readonly:true}});const integrity=db.pragma('integrity_check',{{simple:true}});const pages=db.pragma('page_count',{{simple:true}});const foreignKeys=db.pragma('foreign_key_check');const tables=new Set(db.prepare(\"SELECT name FROM sqlite_master WHERE type='table'\").all().map(row=>row.name));db.close();const required=['businesses','users','invoices','invoice_items'];if(integrity!=='ok'||pages<2||foreignKeys.length||required.some(table=>!tables.has(table))){{console.error('Invalid TexTradeOS database backup');process.exit(1)}}";
+            var result = await RunAsync(
+                "docker",
+                $"exec textradeos-backend node -e {Quote(script)}",
+                log);
+            if (result.ExitCode != 0)
+                throw new InvalidDataException("The selected SQLite backup failed its integrity check.");
+        }
+        finally
+        {
+            File.Delete(temporaryHostPath);
+        }
+    }
+
+    internal async Task<UpdateMetadata?> CheckForUpdateAsync()
+    {
+        using var response = await _http.GetAsync(MetadataUrl);
+        if (!response.IsSuccessStatusCode) return null;
+        var metadata = JsonSerializer.Deserialize<UpdateMetadata>(
+            await response.Content.ReadAsStringAsync(), JsonOptions.Default);
+        if (metadata is null || !IsTrusted(metadata)) return null;
+        var current = ReadEnvironment().GetValueOrDefault("APP_VERSION", "0.0.0");
+        return CompareVersions(metadata.Version, current) > 0 ? metadata : null;
+    }
+
+    internal async Task InstallUpdateAsync(UpdateMetadata update, Action<string> log)
+    {
+        if (!IsTrusted(update)) throw new InvalidOperationException("Update metadata is not trusted.");
+        var launcherVersion = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(1, 0, 0);
+        if (Version.TryParse(update.MinimumLauncherVersion, out var minimumLauncher) &&
+            launcherVersion < minimumLauncher)
+        {
+            throw new InvalidOperationException(
+                $"This release requires launcher {minimumLauncher} or newer. Install the new TexTradeOS setup package from the release page.");
+        }
+        log($"Pulling TexTradeOS {update.Version}...");
+        if ((await RunAsync("docker", $"pull {Quote(update.BackendImage)}", log)).ExitCode != 0 ||
+            (await RunAsync("docker", $"pull {Quote(update.FrontendImage)}", log)).ExitCode != 0)
+            throw new InvalidOperationException("One or more update images could not be downloaded.");
+
+        var oldEnvironment = File.ReadAllText(EnvironmentPath);
+        var databaseBackup = await BackupAsync(log);
+        await StopAsync(log);
+        try
+        {
+            var environment = ReadEnvironment();
+            environment["APP_VERSION"] = update.Version;
+            environment["BACKEND_IMAGE"] = update.BackendImage;
+            environment["FRONTEND_IMAGE"] = update.FrontendImage;
+            WriteEnvironment(environment);
+            File.Delete(UpdateRequestPath);
+            await StartAsync(log);
+            PruneBackups();
+        }
+        catch
+        {
+            log("Update failed. Restoring the previous release...");
+            await ComposeAsync("down", log);
+            File.WriteAllText(EnvironmentPath, oldEnvironment);
+            File.Copy(databaseBackup, Path.Combine(DataDirectory, "textradeos.sqlite"), true);
+            DeleteWalFiles();
+            await StartAsync(log);
+            throw;
+        }
+    }
+
+    internal UpdateMetadata? ReadRequestedUpdate()
+    {
+        try
+        {
+            if (!File.Exists(UpdateRequestPath)) return null;
+            var update = JsonSerializer.Deserialize<UpdateMetadata>(
+                File.ReadAllText(UpdateRequestPath), JsonOptions.Default);
+            return update is not null && IsTrusted(update) ? update : null;
+        }
+        catch { return null; }
+    }
+
+    internal void ImportLicense(string sourcePath, FingerprintDocument fingerprint)
+    {
+        var temporaryPath = Path.Combine(LicenseDirectory, "license.importing.json");
+        File.Copy(sourcePath, temporaryPath, true);
+        var validation = LicenseService.Validate(temporaryPath, fingerprint);
+        if (!validation.Allowed)
+        {
+            File.Delete(temporaryPath);
+            throw new InvalidOperationException(validation.Message);
+        }
+        File.Move(temporaryPath, LicensePath, true);
+    }
+
+    internal string ExportFingerprintRequest(FingerprintDocument fingerprint, string destinationDirectory)
+    {
+        var path = Path.Combine(destinationDirectory,
+            $"TexTradeOS-Fingerprint-{Environment.MachineName}.json");
+        File.WriteAllText(path, JsonSerializer.Serialize(fingerprint, JsonOptions.Default));
+        return path;
+    }
+
+    internal string LocalUrl => "http://127.0.0.1:8080";
+    internal string LanUrl => $"http://{GetLanAddress()}:8080";
+
+    internal void OpenApplication() =>
+        Process.Start(new ProcessStartInfo(LocalUrl) { UseShellExecute = true });
+
+    internal async Task ConfigureFirewallAsync(Action<string> log)
+    {
+        var command =
+            "New-NetFirewallRule -DisplayName 'TexTradeOS LAN' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8080 -Profile Private -ErrorAction SilentlyContinue";
+        var arguments =
+            $"-NoProfile -Command \"Start-Process powershell.exe -Verb RunAs -Wait -ArgumentList '-NoProfile -Command \"\"{command}\"\"'\"";
+        await RunAsync("powershell.exe", arguments, log);
+    }
+
+    private async Task<ProcessResult> ComposeAsync(string arguments, Action<string> log) =>
+        await RunAsync("docker",
+            $"compose --env-file {Quote(EnvironmentPath)} -f {Quote(ComposePath)} {arguments}", log);
+
+    private async Task<bool> WaitForHealthAsync(TimeSpan timeout)
+    {
+        var started = DateTime.UtcNow;
+        while (DateTime.UtcNow - started < timeout)
+        {
+            try
+            {
+                using var response = await _http.GetAsync($"{LocalUrl}/api/health");
+                if (response.IsSuccessStatusCode) return true;
+            }
+            catch { }
+            await Task.Delay(1500);
+        }
+        return false;
+    }
+
+    private static async Task<ProcessResult> RunAsync(
+        string fileName, string arguments, Action<string> log, bool emitOutput = true)
+    {
+        var startInfo = new ProcessStartInfo(fileName, arguments)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        using var process = Process.Start(startInfo);
+        if (process is null) return new ProcessResult(-1, "", "Could not start process");
+        var outputTask = process.StandardOutput.ReadToEndAsync();
+        var errorTask = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        var output = await outputTask;
+        var error = await errorTask;
+        if (emitOutput)
+        {
+            if (!string.IsNullOrWhiteSpace(output)) log(output.Trim());
+            if (!string.IsNullOrWhiteSpace(error)) log(error.Trim());
+        }
+        return new ProcessResult(process.ExitCode, output, error);
+    }
+
+    private Dictionary<string, string> ReadEnvironment() =>
+        File.ReadAllLines(EnvironmentPath)
+            .Where(line => !string.IsNullOrWhiteSpace(line) && !line.TrimStart().StartsWith('#'))
+            .Select(line => line.Split('=', 2))
+            .Where(parts => parts.Length == 2)
+            .ToDictionary(parts => parts[0].Trim(), parts => parts[1].Trim());
+
+    private void WriteEnvironment(Dictionary<string, string> values) =>
+        File.WriteAllLines(EnvironmentPath, values.Select(item => $"{item.Key}={item.Value}"));
+
+    private static bool IsTrusted(UpdateMetadata update) =>
+        Version.TryParse(update.Version, out _) &&
+        update.ReleaseUrl.StartsWith("https://github.com/Spark-Pair/", StringComparison.OrdinalIgnoreCase) &&
+        update.FrontendImage.StartsWith("ghcr.io/spark-pair/textradeos-frontend@sha256:", StringComparison.OrdinalIgnoreCase) &&
+        update.BackendImage.StartsWith("ghcr.io/spark-pair/textradeos-backend@sha256:", StringComparison.OrdinalIgnoreCase);
+
+    private static int CompareVersions(string left, string right)
+    {
+        if (!Version.TryParse(left, out var a) || !Version.TryParse(right, out var b)) return 0;
+        return a.CompareTo(b);
+    }
+
+    private static string GetLanAddress()
+    {
+        var address = NetworkInterface.GetAllNetworkInterfaces()
+            .Where(item => item.OperationalStatus == OperationalStatus.Up &&
+                           item.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+            .SelectMany(item => item.GetIPProperties().UnicastAddresses)
+            .Select(item => item.Address)
+            .FirstOrDefault(item => item.AddressFamily == AddressFamily.InterNetwork &&
+                                    !IPAddress.IsLoopback(item));
+        return address?.ToString() ?? "SERVER-IP";
+    }
+
+    private static void DeleteWalFiles()
+    {
+        File.Delete(Path.Combine(DataDirectory, "textradeos.sqlite-wal"));
+        File.Delete(Path.Combine(DataDirectory, "textradeos.sqlite-shm"));
+    }
+
+    private static void PruneBackups()
+    {
+        foreach (var file in new DirectoryInfo(BackupDirectory)
+                     .GetFiles("*.sqlite")
+                     .OrderByDescending(file => file.CreationTimeUtc)
+                     .Skip(10))
+            file.Delete();
+    }
+
+    private static string Quote(string value) => $"\"{value.Replace("\"", "\\\"")}\"";
+    private sealed record ProcessResult(int ExitCode, string Output, string Error);
+}

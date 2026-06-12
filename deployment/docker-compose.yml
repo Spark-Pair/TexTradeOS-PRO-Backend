@@ -1,0 +1,51 @@
+name: textradeos
+
+services:
+  backend:
+    image: ${BACKEND_IMAGE}
+    container_name: textradeos-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      APP_VERSION: ${APP_VERSION}
+      DATABASE_PATH: /data/textradeos.sqlite
+      LICENSE_PATH: /license/license.json
+      FINGERPRINT_PATH: /license/fingerprint.json
+      UPDATE_REQUEST_PATH: /data/update-request.json
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+    volumes:
+      - ${TEXTRADEOS_HOME}/data:/data
+      - ${TEXTRADEOS_HOME}/license:/license:ro
+    networks:
+      - textradeos
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 3s
+      start_period: 20s
+      retries: 5
+
+  frontend:
+    image: ${FRONTEND_IMAGE}
+    container_name: textradeos-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "0.0.0.0:${APP_PORT}:8080"
+    networks:
+      - textradeos
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/"]
+      interval: 15s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+
+networks:
+  textradeos:
+    driver: bridge

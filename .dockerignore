@@ -1,0 +1,12 @@
+.git
+.github
+node_modules
+dist
+.env
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+license
+deployment
+launcher
+README.md

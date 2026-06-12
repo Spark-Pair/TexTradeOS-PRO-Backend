@@ -1,5 +1,10 @@
 node_modules/
+dist/
 .env
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+license/
+artifacts/
+launcher/**/bin/
+launcher/**/obj/

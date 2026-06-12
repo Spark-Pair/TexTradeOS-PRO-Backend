@@ -2,8 +2,16 @@ import jwt from "jsonwebtoken";
 import crypto from "node:crypto";
 import { db, toUserDto } from "./db.js";
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev-secret";
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || "dev-refresh-secret";
+const isProduction = process.env.NODE_ENV === "production";
+const readSecret = (name, developmentFallback) => {
+  const value = String(process.env[name] || "").trim();
+  if (value) return value;
+  if (isProduction) throw new Error(`${name} is required in production`);
+  return developmentFallback;
+};
+
+const JWT_SECRET = readSecret("JWT_SECRET", "dev-secret");
+const JWT_REFRESH_SECRET = readSecret("JWT_REFRESH_SECRET", "dev-refresh-secret");
 
 export const signAccessToken = (user) =>
   jwt.sign({ sub: String(user.id), role: user.role }, JWT_SECRET, { expiresIn: "2h" });
