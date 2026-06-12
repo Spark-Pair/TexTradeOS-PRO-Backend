@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const DEFAULT_UPDATE_URL =
-  "https://github.com/Spark-Pair/TexTradeOS-Releases/releases/latest/download/update.json";
+  "https://github.com/Spark-Pair/TexTradeOS-PRO-Backend/releases/latest/download/update.json";
 const dataDirectory = path.dirname(path.resolve(process.env.DATABASE_PATH || "./textradeos.sqlite"));
 const statePath = path.join(dataDirectory, "update-state.json");
 const requestPath = path.resolve(process.env.UPDATE_REQUEST_PATH || path.join(dataDirectory, "update-request.json"));

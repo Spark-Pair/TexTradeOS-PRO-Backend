@@ -23,7 +23,7 @@ internal sealed class DeploymentService
     internal static readonly string FingerprintPath = Path.Combine(LicenseDirectory, "fingerprint.json");
     internal static readonly string UpdateRequestPath = Path.Combine(DataDirectory, "update-request.json");
     internal const string MetadataUrl =
-        "https://github.com/Spark-Pair/TexTradeOS-Releases/releases/latest/download/update.json";
+        "https://github.com/Spark-Pair/TexTradeOS-PRO-Backend/releases/latest/download/update.json";
 
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(15) };
 

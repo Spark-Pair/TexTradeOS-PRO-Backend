@@ -3,7 +3,8 @@
 ## What the customer receives
 
 - `TexTradeOS-Setup-X.Y.Z.exe`: the single installation file.
-- `license.json`: the signed license issued for the server computer.
+- A signed `*.license.json` file issued after the server fingerprint is
+  generated.
 
 Docker Desktop is the only prerequisite. It must be installed on the Windows
 computer that will act as the TexTradeOS server.
@@ -19,11 +20,24 @@ computer that will act as the TexTradeOS server.
 3. Complete the setup wizard. It installs one self-contained launcher and
    creates a desktop shortcut.
 4. Open **TexTradeOS** from the desktop.
-5. Click **Fingerprint Request** and send the generated JSON file to the
+5. Click **Fingerprint Request** and send the generated JSON request to the
    TexTradeOS developer.
-6. After receiving `license.json`, click **License Import** and select it.
-7. Click **Firewall** once and approve the Windows administrator prompt.
-8. Click **Start**.
+6. On the developer computer, run this inside the backend repository:
+
+   ```powershell
+   npm run license:create -- --request "C:\path\fingerprint.json" --customer "Customer Name"
+   ```
+
+   The signed license is created under:
+
+   ```text
+   %USERPROFILE%\TexTradeOS-Licenses
+   ```
+
+7. Send the generated `*.license.json` file to the customer.
+8. In the launcher, click **License Import** and select that file.
+9. Click **Firewall** once and approve the Windows administrator prompt.
+10. Click **Start**.
 
 The launcher validates the license, starts Docker Desktop when necessary,
 creates `C:\ProgramData\TexTradeOS`, starts both containers, waits for health
@@ -57,9 +71,10 @@ does not automatically delete business data.
 
 ## Updates
 
-The launcher checks the public `Spark-Pair/TexTradeOS-Releases` repository for
-the latest GitHub release metadata. An administrator can approve an optional
-update or defer it. Mandatory updates cannot be bypassed.
+The launcher checks releases in `Spark-Pair/TexTradeOS-PRO-Backend` for the
+latest update metadata. That repository must be public for customer launchers
+to download releases without GitHub credentials. An administrator can approve
+an optional update or defer it. Mandatory updates cannot be bypassed.
 Before installation, the launcher creates a consistent SQLite backup. Failed
 updates automatically restore the previous images and database.
 

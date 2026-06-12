@@ -8,15 +8,16 @@ and `update.json`.
 
 1. Push the frontend repository to `Spark-Pair/TexTradeOS-PRO`.
 2. Push the backend repository to `Spark-Pair/TexTradeOS-PRO-Backend`.
-3. Create a public repository named `Spark-Pair/TexTradeOS-Releases` with a
-   README so it has an initial commit and default branch. It holds only
-   installers and update metadata, not application source.
+3. Make the backend repository public. GitHub Releases in a private repository
+   cannot be downloaded anonymously by customer launchers. If the backend
+   source must remain private, use a separate public releases repository
+   instead.
 4. If the frontend repository is private, create a fine-grained GitHub token
    with read access to it and save it in the backend repository as the Actions
    secret `FRONTEND_REPO_TOKEN`.
-5. Create another fine-grained token with write access to the public releases
-   repository and save it in the backend repository as `RELEASE_REPO_TOKEN`.
-6. Enable GitHub Actions in the backend repository.
+5. Enable GitHub Actions in the backend repository.
+6. In **Settings > Actions > General**, set workflow permissions to
+   **Read and write permissions**.
 7. After the first release, open both GHCR package settings and change package
    visibility to **Public**.
 
@@ -39,7 +40,8 @@ and `update.json`.
    - `notes`: concise customer-facing release notes
 7. Run the workflow from the backend commit that should be released.
 8. Wait for all three jobs to succeed.
-9. Open the resulting GitHub Release and verify that it contains:
+9. Open the resulting release in the backend repository and verify that it
+   contains:
    - `update.json`
    - `TexTradeOS-Setup-X.Y.Z.exe`
    - `TexTradeOS-Portable-X.Y.Z.zip`

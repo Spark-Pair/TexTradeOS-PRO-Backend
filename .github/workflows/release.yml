@@ -144,7 +144,7 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           MANDATORY: ${{ inputs.mandatory }}
-          RELEASE_URL: https://github.com/Spark-Pair/TexTradeOS-Releases/releases/tag/v${{ inputs.version }}
+          RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/v${{ inputs.version }}
           RELEASE_NOTES: ${{ inputs.notes }}
           FRONTEND_IMAGE: ghcr.io/spark-pair/textradeos-frontend@${{ needs.images.outputs.frontend_digest }}
           BACKEND_IMAGE: ghcr.io/spark-pair/textradeos-backend@${{ needs.images.outputs.backend_digest }}
@@ -154,12 +154,12 @@ jobs:
 
       - name: Publish GitHub release
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           mapfile -t assets < <(find artifacts/windows -type f)
           gh release create "v${{ inputs.version }}" \
-            --repo "Spark-Pair/TexTradeOS-Releases" \
+            --target "${{ github.sha }}" \
             --title "TexTradeOS ${{ inputs.version }}" \
             --notes "${{ inputs.notes }}" \
             artifacts/release/update.json \
