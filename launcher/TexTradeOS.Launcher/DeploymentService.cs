@@ -22,6 +22,8 @@ internal sealed class DeploymentService
     internal static readonly string LicensePath = Path.Combine(LicenseDirectory, "license.json");
     internal static readonly string FingerprintPath = Path.Combine(LicenseDirectory, "fingerprint.json");
     internal static readonly string UpdateRequestPath = Path.Combine(DataDirectory, "update-request.json");
+    internal static readonly string CommandDirectory = Path.Combine(DataDirectory, "launcher-commands");
+    internal static readonly string ResultDirectory = Path.Combine(DataDirectory, "launcher-results");
     internal const string MetadataUrl =
         "https://github.com/Spark-Pair/TexTradeOS-PRO-Backend/releases/latest/download/update.json";
 
@@ -34,6 +36,8 @@ internal sealed class DeploymentService
         Directory.CreateDirectory(BackupDirectory);
         Directory.CreateDirectory(LicenseDirectory);
         Directory.CreateDirectory(ConfigDirectory);
+        Directory.CreateDirectory(CommandDirectory);
+        Directory.CreateDirectory(ResultDirectory);
 
         using (var stream = Assembly.GetExecutingAssembly()
                    .GetManifestResourceStream("TexTradeOS.Launcher.docker-compose.yml")
@@ -46,17 +50,45 @@ internal sealed class DeploymentService
         {
             var secret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
             var refreshSecret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
+            var managementSecret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
             File.WriteAllText(EnvironmentPath, $"""
 TEXTRADEOS_HOME=C:/ProgramData/TexTradeOS
 APP_PORT=8080
-APP_VERSION=0.0.0
+APP_VERSION={GetLauncherVersion()}
 FRONTEND_IMAGE=ghcr.io/spark-pair/textradeos-frontend:latest
 BACKEND_IMAGE=ghcr.io/spark-pair/textradeos-backend:latest
 CORS_ORIGIN=*
 JWT_SECRET={secret}
 JWT_REFRESH_SECRET={refreshSecret}
+MANAGEMENT_SECRET={managementSecret}
 """);
         }
+        else
+        {
+            var environment = ReadEnvironment();
+            var launcherVersion = Assembly.GetExecutingAssembly().GetName().Version;
+            var installedVersion = launcherVersion is null
+                ? "0.0.0"
+                : $"{launcherVersion.Major}.{launcherVersion.Minor}.{launcherVersion.Build}";
+            if (environment.GetValueOrDefault("APP_VERSION", "0.0.0") != installedVersion &&
+                (environment.GetValueOrDefault("FRONTEND_IMAGE", "").EndsWith(":latest",
+                     StringComparison.OrdinalIgnoreCase) ||
+                 environment.GetValueOrDefault("FRONTEND_IMAGE", "").EndsWith(":test",
+                     StringComparison.OrdinalIgnoreCase)))
+                environment["APP_VERSION"] = installedVersion;
+            if (!environment.ContainsKey("MANAGEMENT_SECRET"))
+            {
+                environment["MANAGEMENT_SECRET"] =
+                    Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
+            }
+            WriteEnvironment(environment);
+        }
+    }
+
+    private static string GetLauncherVersion()
+    {
+        var version = Assembly.GetExecutingAssembly().GetName().Version;
+        return version is null ? "0.0.0" : $"{version.Major}.{version.Minor}.{version.Build}";
     }
 
     internal async Task<bool> EnsureDockerAsync(Action<string> log)
@@ -220,6 +252,110 @@ JWT_REFRESH_SECRET={refreshSecret}
         catch { return null; }
     }
 
+    internal async Task ProcessRequestedUpdateAsync(Action<string> log)
+    {
+        var update = ReadRequestedUpdate();
+        if (update is null) return;
+        await InstallUpdateAsync(update, log);
+    }
+
+    internal async Task ProcessPendingCommandsAsync(
+        FingerprintDocument fingerprint,
+        Action<string> log)
+    {
+        var environment = ReadEnvironment();
+        var expectedSecret = environment.GetValueOrDefault("MANAGEMENT_SECRET", "");
+        if (string.IsNullOrWhiteSpace(expectedSecret)) return;
+
+        foreach (var commandPath in Directory.GetFiles(CommandDirectory, "*.json")
+                     .OrderBy(path => File.GetCreationTimeUtc(path)))
+        {
+            string id = Path.GetFileNameWithoutExtension(commandPath);
+            try
+            {
+                using var document = JsonDocument.Parse(File.ReadAllText(commandPath));
+                var root = document.RootElement;
+                if (root.GetProperty("secret").GetString() != expectedSecret)
+                    throw new InvalidOperationException("Management command authentication failed.");
+                id = root.GetProperty("id").GetString() ?? id;
+                var type = root.GetProperty("type").GetString() ?? "";
+                var payload = root.TryGetProperty("payload", out var payloadValue)
+                    ? payloadValue
+                    : default;
+                object? result = type switch
+                {
+                    "import-license" => ImportLicenseCommand(payload, fingerprint),
+                    "backup" => new { path = await BackupAsync(log) },
+                    "restore" => await RestoreCommandAsync(payload, log),
+                    "firewall" => await FirewallCommandAsync(log),
+                    _ => throw new InvalidOperationException("Unsupported management command."),
+                };
+                WriteCommandResult(id, new { id, state = "completed", completedAt = DateTime.UtcNow, result });
+            }
+            catch (Exception error)
+            {
+                log($"Management command failed: {error.Message}");
+                WriteCommandResult(id, new
+                {
+                    id,
+                    state = "failed",
+                    completedAt = DateTime.UtcNow,
+                    message = error.Message,
+                });
+            }
+            finally
+            {
+                File.Delete(commandPath);
+            }
+        }
+    }
+
+    private object ImportLicenseCommand(JsonElement payload, FingerprintDocument fingerprint)
+    {
+        if (!payload.TryGetProperty("document", out var licenseDocument))
+            throw new InvalidOperationException("License document is missing.");
+        var temporary = Path.Combine(LicenseDirectory, $"license-{Guid.NewGuid():N}.json");
+        File.WriteAllText(temporary, licenseDocument.GetRawText());
+        try
+        {
+            ImportLicense(temporary, fingerprint);
+            var validation = LicenseService.Validate(LicensePath, fingerprint);
+            return new { validation.Allowed, validation.Message };
+        }
+        finally
+        {
+            File.Delete(temporary);
+        }
+    }
+
+    private async Task<object> RestoreCommandAsync(JsonElement payload, Action<string> log)
+    {
+        var backup = payload.GetProperty("backup").GetString() ?? "";
+        if (Path.GetFileName(backup) != backup)
+            throw new InvalidOperationException("Invalid backup name.");
+        var backupPath = Path.Combine(BackupDirectory, backup);
+        await RestoreAsync(backupPath, log);
+        return new { backup };
+    }
+
+    private async Task<object> FirewallCommandAsync(Action<string> log)
+    {
+        await ConfigureFirewallAsync(log);
+        return new { configured = true };
+    }
+
+    private static void WriteCommandResult(string id, object result)
+    {
+        var path = Path.Combine(ResultDirectory, $"{id}.json");
+        var temporary = $"{path}.tmp";
+        File.WriteAllText(temporary, JsonSerializer.Serialize(result, JsonOptions.Default));
+        File.Move(temporary, path, true);
+        foreach (var oldResult in new DirectoryInfo(ResultDirectory)
+                     .GetFiles("*.json")
+                     .Where(file => file.LastWriteTimeUtc < DateTime.UtcNow.AddDays(-7)))
+            oldResult.Delete();
+    }
+
     internal void ImportLicense(string sourcePath, FingerprintDocument fingerprint)
     {
         var temporaryPath = Path.Combine(LicenseDirectory, "license.importing.json");
@@ -244,8 +380,11 @@ JWT_REFRESH_SECRET={refreshSecret}
     internal string LocalUrl => "http://127.0.0.1:8080";
     internal string LanUrl => $"http://{GetLanAddress()}:8080";
 
-    internal void OpenApplication() =>
-        Process.Start(new ProcessStartInfo(LocalUrl) { UseShellExecute = true });
+    internal void OpenApplication(bool setup = false) =>
+        Process.Start(new ProcessStartInfo(setup ? $"{LocalUrl}/setup" : LocalUrl)
+        {
+            UseShellExecute = true,
+        });
 
     internal async Task ConfigureFirewallAsync(Action<string> log)
     {

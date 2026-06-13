@@ -45,9 +45,27 @@ powershell -ExecutionPolicy Bypass -File launcher\build-launcher.ps1
 ```
 
 The result is the single file `artifacts\launcher\TexTradeOS.exe`. Its Docker
-Compose template is embedded inside the executable. The launcher starts Docker,
-validates the device license, opens the browser, manages backups, and applies
-updates with rollback.
+Compose template is embedded inside the executable. It presents a startup
+splash, starts Docker, opens the browser, and remains hidden as a restricted
+host agent. Licensing, backups, restore, diagnostics, firewall configuration,
+and updates are operated from the authenticated web application.
+
+### Splash preview
+
+After editing `launcher\TexTradeOS.Launcher\MainForm.cs`, preview only the
+splash without starting Docker, opening a browser, or building the installer:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File launcher\preview-splash.ps1
+```
+
+To reopen the existing preview without compiling:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File launcher\preview-splash.ps1 -NoBuild
+```
+
+Click the preview or press `Esc` to close it.
 
 Customer setup instructions are packaged with local release deliverables under
 `..\Installable`. See [RELEASING.md](RELEASING.md) for the publishing process.

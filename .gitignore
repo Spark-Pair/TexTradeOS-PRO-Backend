@@ -8,3 +8,4 @@ license/
 artifacts/
 launcher/**/bin/
 launcher/**/obj/
+.launcher-preview/

@@ -1,252 +1,403 @@
-using System.Diagnostics;
+using System.Drawing.Drawing2D;
 
 namespace TexTradeOS.Launcher;
 
 internal sealed class MainForm : Form
 {
-    private readonly DeploymentService _deployment = new();
-    private readonly FingerprintDocument _fingerprint = FingerprintService.Create();
-    private readonly Label _status = new() { AutoSize = true, Font = new Font("Segoe UI", 11, FontStyle.Bold) };
-    private readonly Label _urls = new() { AutoSize = true };
-    private readonly TextBox _log = new()
+    // ── Brand colors ──────────────────────────────────────────────────────────
+    private static readonly Color BrandTeal      = Color.FromArgb(15, 90, 90);    // #0f5a5a
+    private static readonly Color BrandTealLight = Color.FromArgb(225, 238, 238); // #e1eeee
+    private static readonly Color TextPrimary    = Color.FromArgb(26, 26, 26);
+    private static readonly Color TextMuted      = Color.FromArgb(107, 122, 122);
+    private static readonly Color TextHint       = Color.FromArgb(138, 153, 153);
+    private static readonly Color PanelBorder    = Color.FromArgb(208, 218, 218);
+
+    // ── Services / state ──────────────────────────────────────────────────────
+    private readonly DeploymentService   _deployment  = new();
+    private readonly FingerprintDocument _fingerprint;
+    private readonly bool _openOnly;
+    private readonly bool _preview;
+    private bool _processing;
+
+    // ── Layout constants ──────────────────────────────────────────────────────
+    private const int FormW  = 720;
+    private const int FormH  = 400;
+    private const int SplitX = 430;   // left panel width / right panel start
+    private const int CornerR = 18;
+    private const int PadL   = 48;    // left panel horizontal padding
+
+    // Progress bar geometry
+    private const int ProgW = 230;
+    private const int ProgH = 3;
+    private const int ProgX = PadL;
+    private const int ProgY = 348;
+
+    // Right panel centre
+    private static readonly int RCx = SplitX + (FormW - SplitX) / 2; // 575
+    private static readonly int RCy = FormH / 2;                       // 200
+
+    // ── Left-panel labels ─────────────────────────────────────────────────────
+    private readonly Label _brandLabel = new()
     {
-        Multiline = true,
-        ReadOnly = true,
-        ScrollBars = ScrollBars.Vertical,
-        Dock = DockStyle.Fill,
-        Font = new Font("Consolas", 9),
+        AutoSize  = true,
+        Text      = "TexTradeOS",
+        Font      = new Font("Segoe UI", 12f, FontStyle.Regular),
+        ForeColor = BrandTeal,
+        BackColor = Color.Transparent,
+        Location  = new Point(84, 33),
     };
-    private readonly System.Windows.Forms.Timer _updateRequestTimer = new() { Interval = 5000 };
-    private bool _busy;
 
-    internal MainForm()
+    private readonly Label _headlineLabel = new()
     {
-        Text = "TexTradeOS";
-        Width = 820;
-        Height = 610;
-        MinimumSize = new Size(720, 520);
-        StartPosition = FormStartPosition.CenterScreen;
+        AutoSize  = true,
+        Text      = "Preparing your\nworkspace",
+        Font      = new Font("Segoe UI", 18f, FontStyle.Regular),
+        ForeColor = TextPrimary,
+        BackColor = Color.Transparent,
+        Location  = new Point(PadL, 96),
+    };
 
-        var actions = new FlowLayoutPanel
+    private readonly Label _subLabel = new()
+    {
+        AutoSize  = true,
+        Text      = "Starting services, hang tight",
+        Font      = new Font("Segoe UI", 9f),
+        ForeColor = TextMuted,
+        BackColor = Color.Transparent,
+        Location  = new Point(PadL, 156),
+    };
+
+    private readonly Label _statusLabel = new()
+    {
+        AutoSize  = true,
+        Text      = "Initializing...",
+        Font      = new Font("Segoe UI", 8f),
+        ForeColor = TextHint,
+        BackColor = Color.Transparent,
+        Location  = new Point(ProgX, ProgY - 16),
+    };
+
+    private readonly Label _versionLabel = new()
+    {
+        AutoSize  = true,
+        Text      = "v1.1.0",
+        Font      = new Font("Segoe UI", 8f),
+        ForeColor = Color.FromArgb(160, 176, 176),
+        BackColor = Color.Transparent,
+        Location  = new Point(ProgX, ProgY + ProgH + 8),
+    };
+
+    // ── Right-panel status label ───────────────────────────────────────────────
+    private readonly Label _rightStatusLabel = new()
+    {
+        AutoSize  = true,
+        Text      = "Starting...",
+        Font      = new Font("Segoe UI", 8f),
+        ForeColor = Color.FromArgb(140, 255, 255, 255),
+        BackColor = Color.Transparent,
+    };
+
+    // ── State ─────────────────────────────────────────────────────────────────
+    private int   _progressPct = 0;
+    private float _spinAngle   = 0f;
+
+    // ── Timers ────────────────────────────────────────────────────────────────
+    private readonly System.Windows.Forms.Timer _spinTimer    = new() { Interval = 16 };
+    private readonly System.Windows.Forms.Timer _agentTimer   = new() { Interval = 1200 };
+    private readonly System.Windows.Forms.Timer _previewTimer = new() { Interval = 900 };
+    private int _previewStep;
+
+    // ── Logo bitmap ───────────────────────────────────────────────────────────
+    private Image? _logoImage;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    internal MainForm(bool openOnly = false, bool preview = false)
+    {
+        _openOnly    = openOnly;
+        _preview     = preview;
+        _fingerprint = preview ? new FingerprintDocument() : FingerprintService.Create();
+
+        Text            = "TexTradeOS";
+        FormBorderStyle = FormBorderStyle.None;
+        StartPosition   = FormStartPosition.CenterScreen;
+        ClientSize      = new Size(FormW, FormH);
+        BackColor       = Color.White;
+        ShowInTaskbar   = true;
+        TopMost         = true;
+        DoubleBuffered  = true;
+        KeyPreview      = true;
+
+        // ── Clip window to rounded rectangle so corners are truly transparent ──
+        SetFormRegion();
+
+        // ── Load logo icon ────────────────────────────────────────────────────
+        try
         {
-            AutoSize = true,
-            Dock = DockStyle.Top,
-            WrapContents = true,
-            Padding = new Padding(0, 8, 0, 8),
-        };
-        actions.Controls.AddRange([
-            MakeButton("Start", async () => await StartAppAsync()),
-            MakeButton("Stop", async () => await RunBusyAsync("Stopping", () => _deployment.StopAsync(Log))),
-            MakeButton("Open", () => { _deployment.OpenApplication(); return Task.CompletedTask; }),
-            MakeButton("Check Update", async () => await CheckUpdateAsync(false)),
-            MakeButton("Backup", async () => await BackupAsync()),
-            MakeButton("Restore", async () => await RestoreAsync()),
-            MakeButton("Import License", async () => await ImportLicenseAsync()),
-            MakeButton("Fingerprint Request", async () => await ExportFingerprintAsync()),
-            MakeButton("Firewall", async () => await RunBusyAsync("Configuring firewall", () => _deployment.ConfigureFirewallAsync(Log))),
-            MakeButton("Diagnostics", () => { Process.Start("explorer.exe", DeploymentService.Home); return Task.CompletedTask; }),
+            var stream = typeof(MainForm).Assembly
+                .GetManifestResourceStream("TexTradeOS.Launcher.favicon.ico");
+            if (stream is null)
+            {
+                var ico = Path.Combine(AppContext.BaseDirectory, "favicon.ico");
+                if (File.Exists(ico)) stream = File.OpenRead(ico);
+            }
+            if (stream is not null)
+                using (stream) _logoImage = new Icon(stream, 48, 48).ToBitmap();
+        }
+        catch { /* decorative — swallow */ }
+
+        // Centre right-status label below the logo tile
+        UpdateRightStatusPosition();
+
+        Controls.AddRange([
+            _brandLabel, _headlineLabel, _subLabel,
+            _statusLabel, _versionLabel, _rightStatusLabel,
         ]);
 
-        var header = new Panel { Dock = DockStyle.Top, Height = 112, Padding = new Padding(16, 14, 16, 8) };
-        header.Controls.Add(_urls);
-        header.Controls.Add(_status);
-        _status.Location = new Point(16, 16);
-        _urls.Location = new Point(16, 48);
+        foreach (Control control in Controls)
+        {
+            control.MouseDown += (_, _) =>
+            {
+                if (_preview) Close();
+            };
+        }
 
-        var body = new Panel { Dock = DockStyle.Fill, Padding = new Padding(16) };
-        body.Controls.Add(_log);
-        body.Controls.Add(actions);
-        Controls.Add(body);
-        Controls.Add(header);
+        _spinTimer.Tick    += (_, _) => { _spinAngle = (_spinAngle + 0.5f) % 360f; Invalidate(); };
+        _agentTimer.Tick   += async (_, _) => await ProcessAgentWorkAsync();
+        _previewTimer.Tick += (_, _) => AdvancePreview();
+
+        KeyDown += (_, e) =>
+        {
+            if (_preview && e.KeyCode == Keys.Escape) Close();
+        };
+        MouseDown += (_, _) =>
+        {
+            if (_preview) Close();
+        };
 
         Shown += async (_, _) => await InitializeAsync();
-        _updateRequestTimer.Tick += async (_, _) => await ProcessRequestedUpdateAsync();
     }
 
-    private Button MakeButton(string text, Func<Task> action)
+    // ── Clip the form window to a rounded rectangle ───────────────────────────
+    private void SetFormRegion()
     {
-        var button = new Button { Text = text, AutoSize = true, Height = 34, Margin = new Padding(0, 0, 8, 8) };
-        button.Click += async (_, _) =>
-        {
-            try { await action(); }
-            catch (Exception error) { ShowError(error); }
-        };
-        return button;
+        var path = RoundedRect(new Rectangle(0, 0, FormW, FormH), CornerR);
+        Region = new Region(path);
     }
 
+    // ── Paint ─────────────────────────────────────────────────────────────────
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode     = SmoothingMode.AntiAlias;
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+        // ── Right teal panel ──────────────────────────────────────────────────
+        // Fill as a plain rect — the form's Region already clips all four corners,
+        // so we don't need to hand-round any corner here. Hand-rounding the right
+        // panel's corners with bottomLeft:false left a white triangle at the
+        // bottom-left of the panel where the form's curve clip cut in.
+        using var tealBrush = new SolidBrush(BrandTeal);
+        g.FillRectangle(tealBrush, SplitX, 0, FormW - SplitX, FormH);
+
+        // ── Outer form border ─────────────────────────────────────────────────
+        using var formPath  = RoundedRect(new Rectangle(0, 0, FormW - 1, FormH - 1), CornerR);
+        using var borderPen = new Pen(PanelBorder, 1f);
+        g.DrawPath(borderPen, formPath);
+
+        // ── Right panel rings ─────────────────────────────────────────────────
+        DrawRing(g, RCx, RCy, 140, Color.FromArgb(15,  255, 255, 255));
+        DrawRing(g, RCx, RCy, 105, Color.FromArgb(23,  255, 255, 255));
+        DrawRing(g, RCx, RCy,  72, Color.FromArgb(31,  255, 255, 255));
+
+        // Spinning arc
+        using var spinPen = new Pen(Color.FromArgb(102, 255, 255, 255), 2f)
+            { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        g.DrawArc(spinPen, RCx - 105, RCy - 105, 210, 210, _spinAngle, 220f);
+
+        // ── Logo tile: 88×88 frosted square ──────────────────────────────────
+        var tile = new Rectangle(RCx - 44, RCy - 44, 88, 88);
+        using var tilePath   = RoundedRect(tile, 20);
+        using var tileFill   = new SolidBrush(Color.FromArgb(30, 255, 255, 255));
+        using var tileBorder = new Pen(Color.FromArgb(51, 255, 255, 255), 1f);
+        g.FillPath(tileFill, tilePath);
+        g.DrawPath(tileBorder, tilePath);
+
+        if (_logoImage is not null)
+            g.DrawImage(_logoImage, new Rectangle(RCx - 26, RCy - 26, 52, 52));
+
+        // ── Dot indicators ────────────────────────────────────────────────────
+        int activeDot = (int)(_spinAngle / 120f) % 3;
+        for (int d = 0; d < 3; d++)
+        {
+            var dc = d == activeDot
+                ? Color.FromArgb(229, 255, 255, 255)
+                : Color.FromArgb(64,  255, 255, 255);
+            using var db = new SolidBrush(dc);
+            g.FillEllipse(db, RCx - 12 + d * 10, FormH - 22, 5, 5);
+        }
+
+        // ── Left panel: logo icon ─────────────────────────────────────────────
+        if (_logoImage is not null)
+            g.DrawImage(_logoImage, new Rectangle(PadL, 30, 28, 28));
+
+        // ── Progress track + fill ─────────────────────────────────────────────
+        using var trackBrush = new SolidBrush(BrandTealLight);
+        g.FillRectangle(trackBrush, ProgX, ProgY, ProgW, ProgH);
+
+        int fw = (int)(ProgW * (_progressPct / 100f));
+        if (fw > 0)
+        {
+            using var fillBrush = new SolidBrush(BrandTeal);
+            using var fillPath  = new GraphicsPath();
+            fillPath.AddRectangle(new Rectangle(ProgX, ProgY, fw, ProgH));
+            g.FillPath(fillBrush, fillPath);
+        }
+    }
+
+    // ── Drawing helpers ───────────────────────────────────────────────────────
+    private static void DrawRing(Graphics g, int cx, int cy, int r, Color c)
+    {
+        using var pen = new Pen(c, 1f);
+        g.DrawEllipse(pen, cx - r, cy - r, r * 2, r * 2);
+    }
+
+    private static GraphicsPath RoundedRect(
+        Rectangle r, int rad,
+        bool topLeft     = true, bool topRight    = true,
+        bool bottomLeft  = true, bool bottomRight = true)
+    {
+        var p = new GraphicsPath();
+        int d = rad * 2;
+        if (topLeft)     p.AddArc(r.Left,      r.Top,          d, d, 180, 90);
+        else             p.AddLine(r.Left,      r.Top,          r.Left + rad,   r.Top);
+        if (topRight)    p.AddArc(r.Right - d,  r.Top,          d, d, 270, 90);
+        else             p.AddLine(r.Right - rad, r.Top,        r.Right,        r.Top + rad);
+        if (bottomRight) p.AddArc(r.Right - d,  r.Bottom - d,   d, d,   0, 90);
+        else             p.AddLine(r.Right,      r.Bottom - rad, r.Right,        r.Bottom);
+        if (bottomLeft)  p.AddArc(r.Left,        r.Bottom - d,   d, d,  90, 90);
+        else             p.AddLine(r.Left + rad,  r.Bottom,      r.Left,         r.Bottom - rad);
+        p.CloseFigure();
+        return p;
+    }
+
+    // ── Status update ─────────────────────────────────────────────────────────
+    private void SetStatus(string text, int pct = -1, string rightText = "")
+    {
+        if (InvokeRequired) { BeginInvoke(() => SetStatus(text, pct, rightText)); return; }
+        _statusLabel.Text = text;
+        if (pct >= 0) _progressPct = pct;
+        if (!string.IsNullOrEmpty(rightText))
+        {
+            _rightStatusLabel.Text = rightText;
+            UpdateRightStatusPosition();
+        }
+        Invalidate();
+    }
+
+    private void UpdateRightStatusPosition()
+    {
+        int labelX = RCx - _rightStatusLabel.Width / 2;
+        int labelY = RCy + 44 + 16;
+        _rightStatusLabel.Location = new Point(labelX, labelY);
+    }
+
+    // ── Init flow ─────────────────────────────────────────────────────────────
     private async Task InitializeAsync()
     {
+        _spinTimer.Start();
         try
         {
+            var shownAt = DateTime.UtcNow;
+
+            if (_preview)
+            {
+                Text = "TexTradeOS Splash Preview";
+                _versionLabel.Text = "Preview - click or press Esc to close";
+                AdvancePreview();
+                _previewTimer.Start();
+                return;
+            }
+
+            if (_openOnly)
+            {
+                SetStatus("Opening TexTradeOS...", 90, "Launching...");
+                await EnsureMinimumSplashTimeAsync(shownAt);
+                var lic = LicenseService.Validate(DeploymentService.LicensePath, _fingerprint);
+                _deployment.OpenApplication(!lic.Allowed);
+                Close();
+                return;
+            }
+
+            SetStatus("Preparing application files...", 20, "Files ready");
             _deployment.EnsureLayout(_fingerprint);
-            RefreshLicenseStatus();
-            _urls.Text = $"Local: {_deployment.LocalUrl}\r\nLAN:   {_deployment.LanUrl}";
-            _updateRequestTimer.Start();
 
-            var license = LicenseService.Validate(DeploymentService.LicensePath, _fingerprint);
-            if (!license.Allowed)
-            {
-                Log("Install a valid device license before starting TexTradeOS.");
-                return;
-            }
-            await StartAppAsync();
-        }
-        catch (Exception error) { ShowError(error); }
-    }
-
-    private async Task StartAppAsync()
-    {
-        var license = LicenseService.Validate(DeploymentService.LicensePath, _fingerprint);
-        if (!license.Allowed) throw new InvalidOperationException(license.Message);
-        await RunBusyAsync("Starting Docker", async () =>
-        {
+            SetStatus("Starting Docker Desktop...", 45, "Docker up");
             if (!await _deployment.EnsureDockerAsync(Log))
-                throw new InvalidOperationException("Docker Desktop is not installed or the engine did not start.");
-            var update = await SafeCheckUpdateAsync();
-            if (update?.Mandatory == true)
-            {
-                var answer = MessageBox.Show(
-                    $"TexTradeOS {update.Version} is mandatory and must be installed now.\r\n\r\n{update.Notes}",
-                    "Mandatory update", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning);
-                if (answer != DialogResult.OK) throw new InvalidOperationException("Mandatory update was not approved.");
-                await _deployment.InstallUpdateAsync(update, Log);
-            }
-            else
-            {
-                await _deployment.StartAsync(Log);
-                if (update is not null)
-                {
-                    var answer = MessageBox.Show(
-                        $"TexTradeOS {update.Version} is available. Install it now?\r\n\r\n{update.Notes}",
-                        "Update available", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
-                    if (answer == DialogResult.Yes) await _deployment.InstallUpdateAsync(update, Log);
-                }
-            }
-            _deployment.OpenApplication();
-        });
-    }
+                throw new InvalidOperationException(
+                    "Docker Desktop is not installed or the Docker engine could not start.");
 
-    private async Task CheckUpdateAsync(bool requested)
-    {
-        await RunBusyAsync("Checking for updates", async () =>
-        {
-            var update = requested ? _deployment.ReadRequestedUpdate() : await _deployment.CheckForUpdateAsync();
-            if (update is null)
-            {
-                if (!requested) MessageBox.Show("TexTradeOS is up to date.", "Updates");
-                return;
-            }
-            var buttons = update.Mandatory ? MessageBoxButtons.OKCancel : MessageBoxButtons.YesNo;
-            var answer = MessageBox.Show(
-                $"Install TexTradeOS {update.Version}?\r\n\r\n{update.Notes}",
-                update.Mandatory ? "Mandatory update" : "Update available",
-                buttons,
-                update.Mandatory ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
-            if (answer is DialogResult.Yes or DialogResult.OK)
-                await _deployment.InstallUpdateAsync(update, Log);
-        });
-    }
+            SetStatus("Starting TexTradeOS services...", 70, "Services up");
+            await _deployment.StartAsync(Log);
 
-    private async Task ProcessRequestedUpdateAsync()
-    {
-        if (_busy || !File.Exists(DeploymentService.UpdateRequestPath)) return;
-        await CheckUpdateAsync(true);
-    }
+            SetStatus("Opening TexTradeOS...", 95, "Launching...");
+            var license = LicenseService.Validate(DeploymentService.LicensePath, _fingerprint);
+            await EnsureMinimumSplashTimeAsync(shownAt);
+            _deployment.OpenApplication(!license.Allowed);
 
-    private async Task<UpdateMetadata?> SafeCheckUpdateAsync()
-    {
-        try { return await _deployment.CheckForUpdateAsync(); }
+            _agentTimer.Start();
+            await Task.Delay(700);
+            ShowInTaskbar = false;
+            TopMost       = false;
+            Hide();
+        }
         catch (Exception error)
         {
-            Log($"Update check unavailable: {error.Message}");
-            return null;
+            _spinTimer.Stop();
+            SetStatus(error.Message, -1, "Error");
+            MessageBox.Show(error.Message, "TexTradeOS",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
-    private async Task BackupAsync()
+    private void AdvancePreview()
     {
-        await RunBusyAsync("Creating backup", async () =>
+        var steps = new[]
         {
-            var path = await _deployment.BackupAsync(Log);
-            MessageBox.Show($"Backup created:\r\n{path}", "Backup complete");
-        });
-    }
-
-    private async Task RestoreAsync()
-    {
-        using var dialog = new OpenFileDialog
-        {
-            InitialDirectory = DeploymentService.BackupDirectory,
-            Filter = "SQLite backups (*.sqlite)|*.sqlite",
+            ("Preparing application files...", 20, "Files ready"),
+            ("Starting Docker Desktop...",     45, "Docker up"),
+            ("Starting TexTradeOS services...", 70, "Services up"),
+            ("Opening TexTradeOS...",           95, "Launching..."),
         };
-        if (dialog.ShowDialog(this) != DialogResult.OK) return;
-        if (MessageBox.Show("Replace the current database with this backup?", "Restore",
-                MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
-        await RunBusyAsync("Restoring backup", () => _deployment.RestoreAsync(dialog.FileName, Log));
+        var (text, pct, right) = steps[_previewStep++ % steps.Length];
+        SetStatus(text, pct, right);
     }
 
-    private Task ImportLicenseAsync()
+    // ── Agent loop ────────────────────────────────────────────────────────────
+    private async Task ProcessAgentWorkAsync()
     {
-        using var dialog = new OpenFileDialog { Filter = "TexTradeOS license (*.json)|*.json" };
-        if (dialog.ShowDialog(this) == DialogResult.OK)
-        {
-            _deployment.ImportLicense(dialog.FileName, _fingerprint);
-            RefreshLicenseStatus();
-            MessageBox.Show("License installed successfully.", "License");
-        }
-        return Task.CompletedTask;
-    }
-
-    private Task ExportFingerprintAsync()
-    {
-        using var dialog = new FolderBrowserDialog
-        {
-            Description = "Choose where to save the fingerprint request",
-            UseDescriptionForTitle = true,
-        };
-        if (dialog.ShowDialog(this) == DialogResult.OK)
-        {
-            var path = _deployment.ExportFingerprintRequest(_fingerprint, dialog.SelectedPath);
-            MessageBox.Show($"Fingerprint request created:\r\n{path}", "Fingerprint");
-        }
-        return Task.CompletedTask;
-    }
-
-    private void RefreshLicenseStatus()
-    {
-        var license = LicenseService.Validate(DeploymentService.LicensePath, _fingerprint);
-        _status.Text = license.Allowed ? $"Ready - {license.Message}" : $"License required - {license.Message}";
-        _status.ForeColor = license.Allowed ? Color.DarkGreen : Color.DarkRed;
-    }
-
-    private async Task RunBusyAsync(string activity, Func<Task> action)
-    {
-        if (_busy) return;
-        _busy = true;
-        _status.Text = activity;
-        UseWaitCursor = true;
+        if (_processing) return;
+        _processing = true;
         try
         {
-            await action();
-            RefreshLicenseStatus();
+            await _deployment.ProcessPendingCommandsAsync(_fingerprint, Log);
+            if (File.Exists(DeploymentService.UpdateRequestPath))
+                await _deployment.ProcessRequestedUpdateAsync(Log);
         }
-        finally
-        {
-            UseWaitCursor = false;
-            _busy = false;
-        }
+        catch (Exception error) { Log($"Background operation failed: {error.Message}"); }
+        finally { _processing = false; }
     }
 
-    private void Log(string message)
+    private static async Task EnsureMinimumSplashTimeAsync(DateTime shownAt)
     {
-        if (InvokeRequired) { BeginInvoke(() => Log(message)); return; }
-        _log.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}\r\n");
+        var remaining = TimeSpan.FromMilliseconds(1800) - (DateTime.UtcNow - shownAt);
+        if (remaining > TimeSpan.Zero) await Task.Delay(remaining);
     }
 
-    private void ShowError(Exception error)
+    private static void Log(string message)
     {
-        Log($"ERROR: {error.Message}");
-        MessageBox.Show(error.Message, "TexTradeOS", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        RefreshLicenseStatus();
+        Directory.CreateDirectory(DeploymentService.Home);
+        File.AppendAllText(
+            Path.Combine(DeploymentService.DataDirectory, "launcher.log"),
+            $"[{DateTimeOffset.Now:O}] {message}{Environment.NewLine}");
     }
 }

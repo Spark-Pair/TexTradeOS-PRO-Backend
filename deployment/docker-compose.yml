@@ -12,12 +12,15 @@ services:
       DATABASE_PATH: /data/textradeos.sqlite
       LICENSE_PATH: /license/license.json
       FINGERPRINT_PATH: /license/fingerprint.json
+      BACKUP_PATH: /backups
       UPDATE_REQUEST_PATH: /data/update-request.json
+      MANAGEMENT_SECRET: ${MANAGEMENT_SECRET}
       JWT_SECRET: ${JWT_SECRET}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       CORS_ORIGIN: ${CORS_ORIGIN}
     volumes:
       - ${TEXTRADEOS_HOME}/data:/data
+      - ${TEXTRADEOS_HOME}/backups:/backups:ro
       - ${TEXTRADEOS_HOME}/license:/license:ro
     networks:
       - textradeos

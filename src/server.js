@@ -1,4 +1,5 @@
 import "dotenv/config";
+import fs from "node:fs";
 import express from "express";
 import cors from "cors";
 import bcrypt from "bcryptjs";
@@ -7,6 +8,13 @@ import { db, defaultReferenceData, defaultRuleData, parseJson, toBusinessDto, to
 import { newSessionId, requireAuth, requireBusinessAdmin, requireDeveloper, signAccessToken, signRefreshToken } from "./auth.js";
 import { requireLicense, validateLicense } from "./license.js";
 import { checkForUpdate, getPendingMandatoryUpdate, requestUpdate } from "./updates.js";
+import {
+  listBackups,
+  readFingerprint,
+  readLauncherLog,
+  readLauncherResult,
+  submitLauncherCommand,
+} from "./management.js";
 import { asyncHandler, normalizeStringList, now, paginate } from "./utils.js";
 
 const app = express();
@@ -68,6 +76,33 @@ app.get("/api/version", (req, res) => {
 app.get("/api/license/status", (req, res) => {
   const result = validateLicense();
   res.status(result.allowed ? 200 : 403).json(result);
+});
+
+app.get("/api/setup/status", (req, res) => {
+  const license = validateLicense();
+  res.json({ license, version: APP_VERSION });
+});
+
+app.get("/api/setup/fingerprint", (req, res) => {
+  try {
+    const fingerprint = readFingerprint();
+    res.setHeader("Content-Disposition", "attachment; filename=TexTradeOS-Fingerprint.json");
+    res.json(fingerprint);
+  } catch {
+    res.status(404).json({ message: "Device fingerprint is not available" });
+  }
+});
+
+app.post("/api/setup/license", (req, res) => {
+  if (!req.body?.payload || !req.body?.signature) {
+    return res.status(400).json({ message: "Select a valid TexTradeOS license file" });
+  }
+  res.status(202).json(submitLauncherCommand("import-license", { document: req.body }));
+});
+
+app.get("/api/setup/commands/:id", (req, res) => {
+  const result = readLauncherResult(req.params.id);
+  res.json(result || { id: req.params.id, state: "pending" });
 });
 
 app.use("/api", requireLicense);
@@ -174,6 +209,53 @@ app.get("/api/updates/status", requireAuth, asyncHandler(async (req, res) => {
 app.post("/api/updates/install", requireAuth, requireBusinessAdmin, asyncHandler(async (req, res) => {
   res.status(202).json(await requestUpdate());
 }));
+
+app.get("/api/system/status", requireAuth, requireBusinessAdmin, asyncHandler(async (req, res) => {
+  const update = await checkForUpdate();
+  const databaseStats = fs.statSync(process.env.DATABASE_PATH || "./textradeos.sqlite");
+  res.json({
+    version: APP_VERSION,
+    license: validateLicense(),
+    update,
+    databaseSize: databaseStats.size,
+    backups: listBackups(),
+  });
+}));
+
+app.get("/api/system/diagnostics", requireAuth, requireBusinessAdmin, (req, res) => {
+  const databasePath = process.env.DATABASE_PATH || "./textradeos.sqlite";
+  const diagnostics = {
+    generatedAt: new Date().toISOString(),
+    version: APP_VERSION,
+    node: process.version,
+    platform: process.platform,
+    license: validateLicense(),
+    database: {
+      path: databasePath,
+      size: fs.existsSync(databasePath) ? fs.statSync(databasePath).size : 0,
+    },
+    backups: listBackups(),
+    launcherLog: readLauncherLog(),
+  };
+  res.setHeader("Content-Disposition", "attachment; filename=TexTradeOS-Diagnostics.json");
+  res.json(diagnostics);
+});
+
+app.post("/api/system/commands", requireAuth, requireBusinessAdmin, (req, res) => {
+  const type = String(req.body?.type || "");
+  const allowed = new Set(["backup", "restore", "firewall"]);
+  if (!allowed.has(type)) return res.status(400).json({ message: "Unsupported system operation" });
+  if (type === "restore" && !/^textradeos-\d{8}-\d{6}\.sqlite$/i.test(String(req.body?.backup || ""))) {
+    return res.status(400).json({ message: "Select a valid backup" });
+  }
+  const payload = type === "restore" ? { backup: req.body.backup } : {};
+  res.status(202).json(submitLauncherCommand(type, payload));
+});
+
+app.get("/api/system/commands/:id", requireAuth, requireBusinessAdmin, (req, res) => {
+  const result = readLauncherResult(req.params.id);
+  res.json(result || { id: req.params.id, state: "pending" });
+});
 
 app.use("/api", (req, res, next) => {
   const update = getPendingMandatoryUpdate();

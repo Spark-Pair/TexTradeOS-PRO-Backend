@@ -17,6 +17,11 @@ on:
         required: true
         default: false
         type: boolean
+      minimum_launcher_version:
+        description: Minimum installed Windows launcher version
+        required: true
+        default: 1.0.0
+        type: string
       notes:
         description: Release notes shown inside TexTradeOS
         required: false
@@ -39,6 +44,7 @@ jobs:
         shell: bash
         run: |
           [[ "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+          [[ "${{ inputs.minimum_launcher_version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
 
       - name: Checkout backend
         uses: actions/checkout@v4
@@ -146,6 +152,7 @@ jobs:
           MANDATORY: ${{ inputs.mandatory }}
           RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/v${{ inputs.version }}
           RELEASE_NOTES: ${{ inputs.notes }}
+          MINIMUM_LAUNCHER_VERSION: ${{ inputs.minimum_launcher_version }}
           FRONTEND_IMAGE: ghcr.io/spark-pair/textradeos-frontend@${{ needs.images.outputs.frontend_digest }}
           BACKEND_IMAGE: ghcr.io/spark-pair/textradeos-backend@${{ needs.images.outputs.backend_digest }}
           FRONTEND_COMMIT: ${{ needs.images.outputs.frontend_commit }}

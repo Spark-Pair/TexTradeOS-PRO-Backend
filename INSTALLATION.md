@@ -20,8 +20,8 @@ computer that will act as the TexTradeOS server.
 3. Complete the setup wizard. It installs one self-contained launcher and
    creates a desktop shortcut.
 4. Open **TexTradeOS** from the desktop.
-5. Click **Fingerprint Request** and send the generated JSON request to the
-   TexTradeOS developer.
+5. The browser opens the activation page. Click **Download Fingerprint
+   Request** and send the generated JSON request to the TexTradeOS developer.
 6. On the developer computer, run this inside the backend repository:
 
    ```powershell
@@ -35,13 +35,15 @@ computer that will act as the TexTradeOS server.
    ```
 
 7. Send the generated `*.license.json` file to the customer.
-8. In the launcher, click **License Import** and select that file.
-9. Click **Firewall** once and approve the Windows administrator prompt.
-10. Click **Start**.
+8. In the browser activation page, click **Import Signed License** and select
+   that file.
+9. Continue to login. An administrator can configure the firewall under
+   **Settings > System Management**.
 
-The launcher validates the license, starts Docker Desktop when necessary,
+The launcher shows a startup splash, starts Docker Desktop when necessary,
 creates `C:\ProgramData\TexTradeOS`, starts both containers, waits for health
-checks, and opens TexTradeOS in the default browser.
+checks, opens TexTradeOS in the default browser, and then remains hidden as the
+restricted Windows management agent.
 
 ## Connect other users
 
@@ -66,8 +68,9 @@ C:\ProgramData\TexTradeOS\license
 C:\ProgramData\TexTradeOS\config
 ```
 
-Use the launcher's **Backup** and **Restore** buttons. Uninstalling the launcher
-does not automatically delete business data.
+Administrators use **Settings > System Management** for backup, restore,
+licensing, diagnostics, firewall configuration, and updates. Uninstalling the
+launcher does not automatically delete business data.
 
 ## Updates
 

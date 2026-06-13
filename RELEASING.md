@@ -37,6 +37,8 @@ and `update.json`.
    - `version`: a new semantic version such as `1.0.1`
    - `frontend_ref`: the exact frontend commit SHA
    - `mandatory`: `false` for normal updates or `true` for required updates
+   - `minimum_launcher_version`: normally the currently supported launcher;
+     use the new version when launcher code changed
    - `notes`: concise customer-facing release notes
 7. Run the workflow from the backend commit that should be released.
 8. Wait for all three jobs to succeed.
@@ -69,3 +71,7 @@ application API use until the launcher installs the release.
 Container-only releases update automatically. When a release requires a newer
 launcher, increase `minimumLauncherVersion` in the release metadata generation
 and have customers run the new setup executable from the GitHub Release.
+
+Release `1.1.0` is the transition to the hidden launcher agent and web-based
+system management. Existing `1.0.0` installations must run the `1.1.0` setup
+once. Later container-only updates can be installed entirely from the web app.

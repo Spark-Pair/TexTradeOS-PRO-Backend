@@ -1,3 +1,7 @@
+param(
+  [string]$Version = "1.1.0"
+)
+
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $PSScriptRoot "TexTradeOS.Launcher\TexTradeOS.Launcher.csproj"
@@ -10,6 +14,7 @@ docker run --rm `
   mcr.microsoft.com/dotnet/sdk:8.0 `
   dotnet publish "launcher/TexTradeOS.Launcher/TexTradeOS.Launcher.csproj" `
     -c Release -r win-x64 --self-contained true `
+    -p:Version=$Version `
     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
     -o /src/artifacts/launcher
 Remove-Item (Join-Path $output "TexTradeOS.pdb") -Force -ErrorAction SilentlyContinue

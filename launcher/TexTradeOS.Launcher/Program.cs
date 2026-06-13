@@ -5,6 +5,20 @@ internal static class Program
     [STAThread]
     private static async Task<int> Main(string[] args)
     {
+        if (args.Contains("--preview", StringComparer.OrdinalIgnoreCase))
+        {
+            ApplicationConfiguration.Initialize();
+            Application.Run(new MainForm(preview: true));
+            return 0;
+        }
+
+        using var mutex = new Mutex(true, "TexTradeOS.Launcher.Singleton", out var isFirstInstance);
+        if (!isFirstInstance && args.Length == 0)
+        {
+            ApplicationConfiguration.Initialize();
+            Application.Run(new MainForm(openOnly: true));
+            return 0;
+        }
         if (args.Length > 0)
         {
             var fingerprint = FingerprintService.Create();

@@ -18,6 +18,8 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 WizardStyle=modern
+SetupIconFile=..\launcher\TexTradeOS.Launcher\favicon.ico
+UninstallDisplayIcon={app}\TexTradeOS.exe
 
 [Files]
 Source: "..\artifacts\launcher\TexTradeOS.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -28,3 +30,14 @@ Name: "{group}\TexTradeOS"; Filename: "{app}\TexTradeOS.exe"
 
 [Run]
 Filename: "{app}\TexTradeOS.exe"; Description: "Launch TexTradeOS"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{cmd}'),
+    '/C taskkill /F /IM TexTradeOS.exe >nul 2>&1',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := '';
+end;
