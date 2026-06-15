@@ -6,6 +6,7 @@ const dbPath = path.resolve(
   process.env.DATABASE_PATH || path.resolve(process.cwd(), "textradeos.sqlite")
 );
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+const isFreshDatabase = !fs.existsSync(dbPath) || fs.statSync(dbPath).size === 0;
 
 export const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
@@ -121,20 +122,17 @@ const createTables = () => {
 };
 
 const seed = () => {
-  const businessCount = db.prepare("SELECT COUNT(*) AS count FROM businesses").get().count;
-  let businessId = 1;
-
-  if (!businessCount) {
+  db.transaction(() => {
     const createdAt = now();
-    const res = db.prepare(`
+    const business = db.prepare(`
       INSERT INTO businesses (
         name, person, price, registration_date, is_active, reference_data, rule_data,
         invoice_banner_data, machine_options, invoice_counter_year, invoice_counter_last,
         created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      "TexTrade Demo",
-      "Owner",
+      "TexTradeOS",
+      "",
       0,
       createdAt,
       1,
@@ -147,23 +145,15 @@ const seed = () => {
       createdAt,
       createdAt
     );
-    businessId = Number(res.lastInsertRowid);
-  } else {
-    businessId = db.prepare("SELECT id FROM businesses ORDER BY id LIMIT 1").get().id;
-  }
-
-  const userCount = db.prepare("SELECT COUNT(*) AS count FROM users").get().count;
-  if (!userCount) {
+    const businessId = Number(business.lastInsertRowid);
     const insertUser = db.prepare(`
       INSERT INTO users (business_id, name, username, password_hash, role, is_active, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, 1, ?, ?)
     `);
 
-    const createdAt = now();
     [
       { name: "Developer", username: "developer", password: "developer123", role: "developer", businessId },
       { name: "Admin", username: "admin", password: "admin123", role: "admin", businessId },
-      { name: "Staff", username: "staff", password: "staff123", role: "staff", businessId },
     ].forEach((user) => {
       insertUser.run(
         user.businessId,
@@ -175,154 +165,11 @@ const seed = () => {
         createdAt
       );
     });
-  }
-
-  const admin = db.prepare("SELECT id FROM users WHERE business_id = ? AND role = 'admin' ORDER BY id LIMIT 1").get(businessId);
-  const samples = [
-    {
-      number: "2026-0001",
-      date: "2026-04-12",
-      customer: "Al Noor Garments",
-      phone: "0300-1112233",
-      address: "Korangi, Karachi",
-      items: [
-        { size: "M", description: "Cotton Shirt", pcs: 24, rate: 420, discount: "5%" },
-      ],
-    },
-    {
-      number: "2026-0002",
-      date: "2026-05-06",
-      customer: "City Fashion",
-      phone: "0312-4445566",
-      address: "Saddar, Karachi",
-      items: [
-        { size: "L", description: "Printed T Shirt", pcs: 36, rate: 350, discount: "" },
-      ],
-    },
-    {
-      number: "2026-0003",
-      date: "2026-05-21",
-      customer: "New Style Traders",
-      phone: "0333-7654321",
-      address: "Lahore",
-      items: [
-        { size: "XL", description: "Track Suit", pcs: 18, rate: 950, discount: "500" },
-      ],
-    },
-    {
-      number: "2026-0004",
-      date: "2026-06-01",
-      customer: "Awan Collection",
-      phone: "0301-2223344",
-      address: "Faisalabad",
-      items: [
-        { size: "M", description: "Polo Shirt", pcs: 48, rate: 480, discount: "4%" },
-        { size: "L", description: "Polo Shirt", pcs: 24, rate: 500, discount: "" },
-      ],
-    },
-    {
-      number: "2026-0005",
-      date: "2026-06-04",
-      customer: "Modern Wear",
-      phone: "0321-9998877",
-      address: "Hyderabad",
-      items: [
-        { size: "S", description: "Kids Trouser", pcs: 60, rate: 275, discount: "3%" },
-      ],
-    },
-    {
-      number: "2026-0006",
-      date: "2026-06-07",
-      customer: "Prime Textile",
-      phone: "0345-1239876",
-      address: "SITE Area, Karachi",
-      items: [
-        { size: "L", description: "Work Uniform", pcs: 30, rate: 780, discount: "" },
-      ],
-    },
-  ];
-
-  const insertInvoice = db.prepare(`
-    INSERT INTO invoices (
-      business_id, created_by, invoice_number, invoice_date, customer_name,
-      customer_phone, customer_address, total_amount, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const insertItem = db.prepare(`
-    INSERT INTO invoice_items (
-      invoice_id, position, size, description, dzn, pcs, rate,
-      discount, discount_amount, amount
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  db.transaction(() => {
-    let nextInvoiceNo = Number(
-      db.prepare(`
-        SELECT MAX(CAST(SUBSTR(invoice_number, 6) AS INTEGER)) AS last_no
-        FROM invoices
-        WHERE business_id = ? AND invoice_number LIKE '2026-%'
-      `).get(businessId)?.last_no || 0
-    );
-
-    samples.forEach((sample) => {
-      const exists = db.prepare(`
-        SELECT id FROM invoices
-        WHERE business_id = ? AND invoice_date = ? AND customer_name = ?
-        LIMIT 1
-      `).get(businessId, sample.date, sample.customer);
-      if (exists) return;
-
-      nextInvoiceNo += 1;
-      const invoiceNumber = `2026-${String(nextInvoiceNo).padStart(4, "0")}`;
-      const normalizedItems = sample.items.map((item) => {
-        const gross = item.pcs * item.rate;
-        const rawDiscount = String(item.discount || "");
-        const discountAmount = rawDiscount.endsWith("%")
-          ? gross * Number(rawDiscount.slice(0, -1) || 0) / 100
-          : Number(rawDiscount || 0);
-        return {
-          ...item,
-          dzn: item.pcs / 12,
-          discountAmount,
-          amount: gross - discountAmount,
-        };
-      });
-      const total = normalizedItems.reduce((sum, item) => sum + item.amount, 0);
-      const timestamp = `${sample.date}T10:00:00.000Z`;
-      const result = insertInvoice.run(
-        businessId,
-        admin?.id || null,
-        invoiceNumber,
-        sample.date,
-        sample.customer,
-        sample.phone,
-        sample.address,
-        total,
-        timestamp,
-        timestamp
-      );
-      normalizedItems.forEach((item, index) => {
-        insertItem.run(
-          result.lastInsertRowid,
-          index + 1,
-          item.size,
-          item.description,
-          item.dzn,
-          item.pcs,
-          item.rate,
-          item.discount,
-          item.discountAmount,
-          item.amount
-        );
-      });
-    });
-    db.prepare("UPDATE businesses SET invoice_counter_year = 2026, invoice_counter_last = ? WHERE id = ?")
-      .run(nextInvoiceNo, businessId);
-  })();
+  }).immediate();
 };
 
 createTables();
-seed();
+if (isFreshDatabase) seed();
 
 export const parseJson = (value, fallback) => {
   try {

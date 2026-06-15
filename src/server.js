@@ -791,5 +791,5 @@ app.use((error, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`TexTradeOS backend running on http://localhost:${PORT}`);
-  console.log("Seed logins: developer/developer123, admin/admin123, staff/staff123");
+  console.log("Fresh-install logins: developer/developer123, admin/admin123");
 });

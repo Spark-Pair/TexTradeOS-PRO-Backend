@@ -377,14 +377,34 @@ internal sealed class MainForm : Form
     {
         if (_processing) return;
         _processing = true;
+        var updateRequested = File.Exists(DeploymentService.UpdateRequestPath);
         try
         {
             await _deployment.ProcessPendingCommandsAsync(_fingerprint, Log);
-            if (File.Exists(DeploymentService.UpdateRequestPath))
+            if (updateRequested)
+            {
+                ShowInTaskbar = true;
+                TopMost = true;
+                Show();
+                BringToFront();
+                SetStatus("Installing TexTradeOS update...", 55, "Updating...");
                 await _deployment.ProcessRequestedUpdateAsync(Log);
+                SetStatus("Opening updated TexTradeOS...", 100, "Ready");
+            }
         }
         catch (Exception error) { Log($"Background operation failed: {error.Message}"); }
-        finally { _processing = false; }
+        finally
+        {
+            if (updateRequested)
+            {
+                await Task.Delay(700);
+                _deployment.OpenApplication();
+                ShowInTaskbar = false;
+                TopMost = false;
+                Hide();
+            }
+            _processing = false;
+        }
     }
 
     private static async Task EnsureMinimumSplashTimeAsync(DateTime shownAt)
