@@ -4,7 +4,7 @@ import express from "express";
 import cors from "cors";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { db, defaultReferenceData, defaultRuleData, parseJson, toBusinessDto, toInvoiceDto, toUserDto } from "./db.js";
+import { db, defaultReferenceData, defaultRuleData, parseJson, toInvoiceDto, toUserDto } from "./db.js";
 import { newSessionId, requireAuth, requireBusinessAdmin, requireDeveloper, signAccessToken, signRefreshToken } from "./auth.js";
 import { requireLicense, validateLicense } from "./license.js";
 import { checkForUpdate, getPendingMandatoryUpdate, requestUpdate } from "./updates.js";
@@ -146,35 +146,6 @@ app.post("/api/auth/logout", requireAuth, (req, res) => {
   if (sessionId) {
     db.prepare("UPDATE sessions SET revoked_at = ? WHERE id = ? AND user_id = ?").run(now(), sessionId, req.user.id);
   }
-  res.json({ success: true });
-});
-
-app.post("/api/auth/logout-all", requireAuth, (req, res) => {
-  db.prepare("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL").run(now(), req.user.id);
-  res.json({ success: true });
-});
-
-app.get("/api/auth/sessions", requireAuth, (req, res) => {
-  const rows = db.prepare(`
-    SELECT id, user_agent, ip, created_at, last_seen_at
-    FROM sessions
-    WHERE user_id = ? AND revoked_at IS NULL
-    ORDER BY last_seen_at DESC
-  `).all(req.user.id);
-  res.json({
-    sessions: rows.map((row) => ({
-      sessionId: row.id,
-      userAgent: row.user_agent,
-      ip: row.ip,
-      createdAt: row.created_at,
-      lastSeenAt: row.last_seen_at,
-    })),
-  });
-});
-
-app.delete("/api/auth/sessions/:id", requireAuth, (req, res) => {
-  db.prepare("UPDATE sessions SET revoked_at = ? WHERE id = ? AND user_id = ?")
-    .run(now(), req.params.id, req.user.id);
   res.json({ success: true });
 });
 
@@ -362,16 +333,6 @@ app.delete("/api/users/:id/active-sessions", requireAuth, requireDeveloper, (req
   res.json({ success: true });
 });
 
-app.get("/api/businesses", requireAuth, requireDeveloper, (req, res) => {
-  const rows = db.prepare("SELECT * FROM businesses ORDER BY updated_at DESC").all().map(toBusinessDto);
-  res.json(paginate(rows, req.query));
-});
-
-app.get("/api/businesses/stats", requireAuth, requireDeveloper, (req, res) => {
-  const rows = db.prepare("SELECT is_active FROM businesses").all();
-  res.json(statsResponse(rows));
-});
-
 app.get("/api/businesses/me/reference-data", requireAuth, (req, res) => {
   const business = getBusinessForUser(req.user);
   res.json({ reference_data: normalizeReferenceData(parseJson(business?.reference_data, defaultReferenceData())) });
@@ -401,30 +362,6 @@ app.patch("/api/businesses/me/rule-data", requireAuth, requireBusinessAdmin, (re
   res.json({ rule_data: ruleData, reference_data: referenceData });
 });
 
-app.get("/api/businesses/me/invoice-banner", requireAuth, (req, res) => {
-  const business = getBusinessForUser(req.user);
-  res.json({ invoice_banner_data: business?.invoice_banner_data || "" });
-});
-
-app.patch("/api/businesses/me/invoice-banner", requireAuth, requireBusinessAdmin, (req, res) => {
-  const value = String(req.body?.invoice_banner_data || "");
-  db.prepare("UPDATE businesses SET invoice_banner_data = ?, updated_at = ? WHERE id = ?")
-    .run(value, now(), req.user.business_id);
-  res.json({ invoice_banner_data: value });
-});
-
-app.get("/api/businesses/me/machine-options", requireAuth, (req, res) => {
-  const business = getBusinessForUser(req.user);
-  res.json({ machine_options: normalizeStringList(parseJson(business?.machine_options, [])) });
-});
-
-app.patch("/api/businesses/me/machine-options", requireAuth, requireBusinessAdmin, (req, res) => {
-  const machineOptions = normalizeStringList(req.body?.machine_options || []);
-  db.prepare("UPDATE businesses SET machine_options = ?, updated_at = ? WHERE id = ?")
-    .run(JSON.stringify(machineOptions), now(), req.user.business_id);
-  res.json({ machine_options: machineOptions });
-});
-
 app.get("/api/businesses/me/invoice-counter", requireAuth, (req, res) => {
   const business = getBusinessForUser(req.user);
   const year = Number(req.query.year || new Date().getFullYear());
@@ -442,42 +379,6 @@ app.get("/api/businesses/me/invoice-counter", requireAuth, (req, res) => {
     can_update: Number(stats?.invoice_count || 0) === 0,
     has_invoices: Number(stats?.invoice_count || 0) > 0,
     invoice_count: Number(stats?.invoice_count || 0),
-  });
-});
-
-app.patch("/api/businesses/me/invoice-counter", requireAuth, requireBusinessAdmin, (req, res) => {
-  const year = Number(req.body?.year || new Date().getFullYear());
-  const last = Math.max(0, Number(req.body?.last_invoice_no || 0));
-  const count = db.prepare("SELECT COUNT(*) AS count FROM invoices WHERE business_id = ? AND invoice_number LIKE ?")
-    .get(req.user.business_id, `${year}-%`).count;
-  if (count > 0) return res.status(409).json({ message: "Invoice counter cannot be changed after invoices exist for this year" });
-  db.prepare("UPDATE businesses SET invoice_counter_year = ?, invoice_counter_last = ?, updated_at = ? WHERE id = ?")
-    .run(year, last, now(), req.user.business_id);
-  res.json({ year, last_invoice_no: last, next_invoice_no: last + 1, can_update: true, has_invoices: false, invoice_count: 0 });
-});
-
-app.get("/api/dashboard/summary", requireAuth, (req, res) => {
-  const businessId = req.user.business_id;
-  const invoiceStats = db.prepare(`
-    SELECT COUNT(*) AS count, COALESCE(SUM(total_amount), 0) AS amount
-    FROM invoices WHERE business_id = ?
-  `).get(businessId);
-  const userStats = db.prepare(`
-    SELECT COUNT(*) AS count,
-      SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) AS active
-    FROM users WHERE business_id = ? AND role <> 'developer'
-  `).get(businessId);
-  const recent = db.prepare(`
-    SELECT *, (SELECT COUNT(*) FROM invoice_items WHERE invoice_id = invoices.id) AS order_count
-    FROM invoices WHERE business_id = ?
-    ORDER BY invoice_date DESC, id DESC LIMIT 5
-  `).all(businessId).map((row) => toInvoiceDto(row));
-  res.json({
-    data: {
-      invoices: { count: Number(invoiceStats.count), amount: Number(invoiceStats.amount) },
-      users: { count: Number(userStats.count), active: Number(userStats.active || 0) },
-      recent: { invoices: recent },
-    },
   });
 });
 
@@ -514,23 +415,6 @@ app.get("/api/dashboard/trend", requireAuth, (req, res) => {
   }
 
   res.json({ success: true, data: { from: dateFrom, to: dateTo, trend } });
-});
-
-[
-  "/api/orders",
-  "/api/expenses",
-  "/api/customer-payments",
-  "/api/supplier-payments",
-  "/api/staff-payments",
-  "/api/staff-records",
-  "/api/crp-staff-records",
-  "/api/customers",
-  "/api/suppliers",
-  "/api/staffs",
-].forEach((path) => {
-  app.get(path, requireAuth, (req, res) => {
-    res.json(paginate([], req.query));
-  });
 });
 
 app.get("/api/invoices", requireAuth, (req, res) => {

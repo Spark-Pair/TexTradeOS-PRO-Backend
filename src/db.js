@@ -179,21 +179,6 @@ export const parseJson = (value, fallback) => {
   }
 };
 
-export const toBusinessDto = (row) => {
-  if (!row) return null;
-  return {
-    _id: String(row.id),
-    id: String(row.id),
-    name: row.name,
-    person: row.person,
-    price: Number(row.price || 0),
-    registration_date: row.registration_date,
-    isActive: Boolean(row.is_active),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-};
-
 export const toUserDto = (row) => {
   if (!row) return null;
   return {
