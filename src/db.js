@@ -359,6 +359,7 @@ export const toUserDto = (row) => {
     username: row.username,
     role: row.role,
     isActive: Boolean(row.is_active),
+    createdInvoiceCount: Number(row.created_invoice_count || 0),
     shortcuts: parseJson(row.shortcuts, {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,

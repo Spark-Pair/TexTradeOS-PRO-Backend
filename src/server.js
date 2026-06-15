@@ -37,7 +37,8 @@ app.use(cors({
 app.use(express.json({ limit: "2mb" }));
 
 const userSelect = `
-  SELECT users.*, businesses.name AS business_name
+  SELECT users.*, businesses.name AS business_name,
+    (SELECT COUNT(*) FROM invoices WHERE invoices.created_by = users.id) AS created_invoice_count
   FROM users
   LEFT JOIN businesses ON businesses.id = users.business_id
 `;
@@ -280,13 +281,21 @@ app.get("/api/users/stats", requireAuth, requireDeveloper, (req, res) => {
 });
 
 app.get("/api/users/business", requireAuth, (req, res) => {
-  const rows = db.prepare(`${userSelect} WHERE users.business_id = ? ORDER BY users.updated_at DESC`).all(req.user.business_id).map(toUserDto);
+  const rows = db.prepare(`
+    ${userSelect}
+    WHERE users.business_id = ? AND users.role <> 'developer'
+    ORDER BY users.updated_at DESC
+  `).all(req.user.business_id).map(toUserDto);
   const filtered = filterUsers(rows, req.query);
   res.json(paginate(filtered, req.query));
 });
 
 app.get("/api/users/business/stats", requireAuth, (req, res) => {
-  const rows = db.prepare("SELECT is_active FROM users WHERE business_id = ?").all(req.user.business_id);
+  const rows = db.prepare(`
+    SELECT is_active
+    FROM users
+    WHERE business_id = ? AND role <> 'developer'
+  `).all(req.user.business_id);
   res.json(statsResponse(rows));
 });
 
@@ -326,6 +335,14 @@ app.patch("/api/users/business/:id/reset-password", requireAuth, requireBusiness
 
 app.patch("/api/users/:id/reset-password", requireAuth, requireDeveloper, (req, res) => {
   resetPassword(req.params.id, req.body?.newPassword, null, res);
+});
+
+app.delete("/api/users/business/:id", requireAuth, requireBusinessAdmin, (req, res) => {
+  deleteUser(req.params.id, req.user.business_id, req.user.id, res);
+});
+
+app.delete("/api/users/:id", requireAuth, requireDeveloper, (req, res) => {
+  deleteUser(req.params.id, null, req.user.id, res);
 });
 
 app.get("/api/users/active-sessions", requireAuth, requireDeveloper, (req, res) => {
@@ -448,7 +465,7 @@ app.get("/api/dashboard/summary", requireAuth, (req, res) => {
   const userStats = db.prepare(`
     SELECT COUNT(*) AS count,
       SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) AS active
-    FROM users WHERE business_id = ?
+    FROM users WHERE business_id = ? AND role <> 'developer'
   `).get(businessId);
   const recent = db.prepare(`
     SELECT *, (SELECT COUNT(*) FROM invoice_items WHERE invoice_id = invoices.id) AS order_count
@@ -632,6 +649,25 @@ app.post("/api/invoices", requireAuth, (req, res) => {
   res.status(201).json({ success: true, data: createInvoice.immediate() });
 });
 
+app.delete("/api/invoices/:id", requireAuth, (req, res) => {
+  if (req.user.role !== "developer" && req.user.role !== "admin") {
+    return res.status(403).json({ message: "Admin access required" });
+  }
+
+  const invoice = req.user.role === "developer"
+    ? db.prepare("SELECT id FROM invoices WHERE id = ?").get(req.params.id)
+    : db.prepare("SELECT id FROM invoices WHERE id = ? AND business_id = ?")
+      .get(req.params.id, req.user.business_id);
+  if (!invoice) return res.status(404).json({ message: "Invoice not found" });
+
+  db.transaction(() => {
+    db.prepare("DELETE FROM invoice_items WHERE invoice_id = ?").run(invoice.id);
+    db.prepare("DELETE FROM invoices WHERE id = ?").run(invoice.id);
+  }).immediate();
+
+  res.json({ success: true });
+});
+
 function filterUsers(rows, query) {
   let filtered = [...rows];
   const name = String(query.name || "").toLowerCase().trim();
@@ -650,7 +686,7 @@ function statsResponse(rows) {
 
 function toggleUserStatus(id, businessId, res) {
   const user = businessId
-    ? db.prepare("SELECT * FROM users WHERE id = ? AND business_id = ?").get(id, businessId)
+    ? db.prepare("SELECT * FROM users WHERE id = ? AND business_id = ? AND role <> 'developer'").get(id, businessId)
     : db.prepare("SELECT * FROM users WHERE id = ?").get(id);
   if (!user) return res.status(404).json({ message: "User not found" });
   const next = user.is_active ? 0 : 1;
@@ -662,12 +698,35 @@ function resetPassword(id, password, businessId, res) {
   const cleanPassword = String(password || "").trim();
   if (!cleanPassword) return res.status(400).json({ message: "New password is required" });
   const user = businessId
-    ? db.prepare("SELECT * FROM users WHERE id = ? AND business_id = ?").get(id, businessId)
+    ? db.prepare("SELECT * FROM users WHERE id = ? AND business_id = ? AND role <> 'developer'").get(id, businessId)
     : db.prepare("SELECT * FROM users WHERE id = ?").get(id);
   if (!user) return res.status(404).json({ message: "User not found" });
   db.prepare("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?")
     .run(bcrypt.hashSync(cleanPassword, 10), now(), id);
   res.json({ success: true });
+}
+
+function deleteUser(id, businessId, currentUserId, res) {
+  if (String(id) === String(currentUserId)) {
+    return res.status(400).json({ message: "You cannot delete your own user account" });
+  }
+
+  const user = businessId
+    ? db.prepare("SELECT * FROM users WHERE id = ? AND business_id = ? AND role <> 'developer'").get(id, businessId)
+    : db.prepare("SELECT * FROM users WHERE id = ?").get(id);
+  if (!user) return res.status(404).json({ message: "User not found" });
+
+  const invoiceCount = db.prepare("SELECT COUNT(*) AS count FROM invoices WHERE created_by = ?")
+    .get(user.id).count;
+  if (Number(invoiceCount) > 0) {
+    return res.status(409).json({
+      message: "This user cannot be deleted because they have created invoices",
+    });
+  }
+
+  db.prepare("DELETE FROM users WHERE id = ?").run(user.id);
+
+  return res.json({ success: true, id: String(user.id) });
 }
 
 function titleCase(value) {
