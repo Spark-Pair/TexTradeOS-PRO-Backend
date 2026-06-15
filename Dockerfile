@@ -17,6 +17,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 RUN mkdir -p /data /license && chown -R node:node /app /data /license
+RUN ! find /app /data -type f \( -name '*.sqlite' -o -name '*.sqlite-shm' -o -name '*.sqlite-wal' \) | grep -q .
 USER node
 EXPOSE 4000
 HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=5 \

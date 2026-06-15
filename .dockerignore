@@ -6,6 +6,9 @@ dist
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+**/*.sqlite
+**/*.sqlite-shm
+**/*.sqlite-wal
 license
 deployment
 launcher
