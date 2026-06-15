@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import PUBLIC_KEY from "./config/licensePublicKey.js";
+import { IS_DEVELOPMENT } from "./environment.js";
 
 const licensePath = path.resolve(process.env.LICENSE_PATH || "./license/license.json");
 const fingerprintPath = path.resolve(process.env.FINGERPRINT_PATH || "./license/fingerprint.json");
@@ -27,6 +28,15 @@ const readJson = (filePath) =>
   JSON.parse(fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/, ""));
 
 export const validateLicense = () => {
+  if (IS_DEVELOPMENT) {
+    return {
+      allowed: true,
+      code: "LICENSE_DEVELOPMENT",
+      customer: "Development Machine",
+      message: "License enforcement is disabled in development",
+    };
+  }
+
   let document;
   let runtimeFingerprint;
   try {
@@ -85,9 +95,6 @@ export const validateLicense = () => {
 };
 
 export const requireLicense = (req, res, next) => {
-  if (process.env.NODE_ENV !== "production" && process.env.LICENSE_ENFORCEMENT !== "true") {
-    return next();
-  }
   const result = validateLicense();
   if (!result.allowed) return res.status(403).json(result);
   req.license = result;

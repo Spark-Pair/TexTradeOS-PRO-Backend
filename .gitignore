@@ -5,6 +5,8 @@ dist/
 *.sqlite-shm
 *.sqlite-wal
 license/
+update-request.json
+update-state.json
 artifacts/
 launcher/**/bin/
 launcher/**/obj/

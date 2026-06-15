@@ -4,7 +4,7 @@
   "description": "Express + SQLite backend for TexTradeOS",
   "main": "src/server.js",
   "scripts": {
-    "dev": "node --watch src/server.js",
+    "dev": "node --env-file=.env.development --watch src/server.js",
     "start": "node src/server.js",
     "start:production": "node dist/server.cjs",
     "build": "node scripts/build.mjs",

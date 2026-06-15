@@ -10,8 +10,9 @@ npm install
 npm run dev
 ```
 
-The development API runs at `http://localhost:4000/api`. License enforcement
-is disabled outside production unless `LICENSE_ENFORCEMENT=true`.
+The development API runs at `http://localhost:4000/api`.
+`npm run dev` loads `IS_DEVELOPMENT=true`, which disables license enforcement
+and all update checks. Production does not load this development environment.
 
 ## Production architecture
 

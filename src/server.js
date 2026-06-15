@@ -196,6 +196,7 @@ app.post("/api/auth/refresh", (req, res) => {
     if (!session) throw new Error("Session not found");
     const user = db.prepare(`${userSelect} WHERE users.id = ?`).get(payload.sub);
     if (!user || !user.is_active) throw new Error("User unavailable");
+    db.prepare("UPDATE sessions SET last_seen_at = ? WHERE id = ?").run(now(), sessionId);
     res.json({ accessToken: signAccessToken(user) });
   } catch {
     res.status(401).json({ message: "Invalid refresh token" });

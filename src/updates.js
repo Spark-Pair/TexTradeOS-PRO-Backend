@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { IS_DEVELOPMENT } from "./environment.js";
 
 const DEFAULT_UPDATE_URL =
   "https://github.com/Spark-Pair/TexTradeOS-PRO-Backend/releases/latest/download/update.json";
@@ -62,6 +63,7 @@ const readCached = () => {
 };
 
 export const getPendingMandatoryUpdate = () => {
+  if (IS_DEVELOPMENT) return null;
   const update = readCached();
   if (!update?.mandatory) return null;
   const currentVersion = process.env.APP_VERSION || "0.0.0";
@@ -75,6 +77,16 @@ const writeCached = (metadata) => {
 
 export const checkForUpdate = async () => {
   const currentVersion = process.env.APP_VERSION || "0.0.0";
+  if (IS_DEVELOPMENT) {
+    return {
+      currentVersion,
+      available: false,
+      online: false,
+      disabled: true,
+      update: null,
+    };
+  }
+
   try {
     const response = await fetch(process.env.UPDATE_METADATA_URL || DEFAULT_UPDATE_URL, {
       headers: { Accept: "application/json", "User-Agent": `TexTradeOS/${currentVersion}` },
@@ -100,6 +112,7 @@ export const checkForUpdate = async () => {
 };
 
 export const requestUpdate = async () => {
+  if (IS_DEVELOPMENT) throw new Error("Updates are disabled in development");
   const status = await checkForUpdate();
   if (!status.available || !status.update) throw new Error("No newer update is available");
   if (!status.online) throw new Error("Connect the server to the internet before updating");
