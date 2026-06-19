@@ -64,7 +64,7 @@ app.get("/api/health", (req, res) => {
   const license = validateLicense();
   res.json({
     ok: true,
-    app: "TexTradeOSBackend",
+    app: "TexTradeOS PRO Backend",
     version: APP_VERSION,
     license: { allowed: license.allowed, code: license.code },
   });
@@ -87,7 +87,7 @@ app.get("/api/setup/status", (req, res) => {
 app.get("/api/setup/fingerprint", (req, res) => {
   try {
     const fingerprint = readFingerprint();
-    res.setHeader("Content-Disposition", "attachment; filename=TexTradeOS-Fingerprint.json");
+    res.setHeader("Content-Disposition", "attachment; filename=TexTradeOS-PRO-Fingerprint.json");
     res.json(fingerprint);
   } catch {
     res.status(404).json({ message: "Device fingerprint is not available" });
@@ -96,7 +96,7 @@ app.get("/api/setup/fingerprint", (req, res) => {
 
 app.post("/api/setup/license", (req, res) => {
   if (!req.body?.payload || !req.body?.signature) {
-    return res.status(400).json({ message: "Select a valid TexTradeOS license file" });
+    return res.status(400).json({ message: "Select a valid TexTradeOS PRO license file" });
   }
   res.status(202).json(submitLauncherCommand("import-license", { document: req.body }));
 });
@@ -210,7 +210,7 @@ app.get("/api/system/diagnostics", requireAuth, requireBusinessAdmin, (req, res)
     backups: listBackups(),
     launcherLog: readLauncherLog(),
   };
-  res.setHeader("Content-Disposition", "attachment; filename=TexTradeOS-Diagnostics.json");
+  res.setHeader("Content-Disposition", "attachment; filename=TexTradeOS-PRO-Diagnostics.json");
   res.json(diagnostics);
 });
 
@@ -235,7 +235,7 @@ app.use("/api", (req, res, next) => {
   if (!update) return next();
   return res.status(503).json({
     code: "MANDATORY_UPDATE_REQUIRED",
-    message: `TexTradeOS ${update.version} must be installed before continuing.`,
+    message: `TexTradeOS PRO ${update.version} must be installed before continuing.`,
     update,
   });
 });
@@ -461,6 +461,7 @@ app.get("/api/invoices/:id", requireAuth, (req, res) => {
 
 app.post("/api/invoices", requireAuth, (req, res) => {
   const customerName = titleCase(req.body?.customer_name);
+  const customerUrduTitle = String(req.body?.customer_urdu_title || "").trim();
   const invoiceDate = String(req.body?.invoice_date || new Date().toISOString().slice(0, 10));
   const articles = Array.isArray(req.body?.articles) ? req.body.articles : [];
   if (!customerName) return res.status(400).json({ message: "Customer name is required" });
@@ -483,31 +484,48 @@ app.post("/api/invoices", requireAuth, (req, res) => {
     const invoiceNumber = `${year}-${String(nextNo).padStart(4, "0")}`;
 
     const normalizedArticles = articles.map((article, index) => normalizeInvoiceItem(article, index));
-    const totalAmount = normalizedArticles.reduce((sum, article) => sum + article.amount, 0);
+    const totals = invoiceTotals(
+      normalizedArticles,
+      req.body?.sales_return_amount,
+      req.body?.received_amount
+    );
     const timestamp = now();
     const result = db.prepare(`
       INSERT INTO invoices (
         business_id, created_by, invoice_number, invoice_date, customer_name,
-        customer_phone, customer_address, total_amount, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        customer_urdu_title, customer_phone, customer_address, gross_amount,
+        percent_discount_amount, rupee_discount_amount, total_discount_amount,
+        net_amount, sales_return_amount, received_amount, balance_amount,
+        return_amount, total_amount, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       req.user.business_id,
       req.user.id,
       invoiceNumber,
       invoiceDate,
       customerName,
+      customerUrduTitle,
       String(req.body?.customer_phone || "").trim(),
       String(req.body?.customer_address || "").trim(),
-      totalAmount,
+      totals.gross_amount,
+      totals.percent_discount_amount,
+      totals.rupee_discount_amount,
+      totals.total_discount_amount,
+      totals.net_amount,
+      totals.sales_return_amount,
+      totals.received_amount,
+      totals.balance_amount,
+      totals.return_amount,
+      totals.total_amount,
       timestamp,
       timestamp
     );
 
     const insertItem = db.prepare(`
       INSERT INTO invoice_items (
-        invoice_id, position, size, description, dzn, pcs, rate,
-        discount, discount_amount, amount
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        invoice_id, position, size, description, dzn, pcs, rate, gross_amount,
+        discount, discount_type, discount_amount, amount
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     normalizedArticles.forEach((article) => {
       insertItem.run(
@@ -518,7 +536,9 @@ app.post("/api/invoices", requireAuth, (req, res) => {
         article.dzn,
         article.pcs,
         article.rate,
+        article.gross_amount,
         article.discount,
+        article.discount_type,
         article.discount_amount,
         article.amount
       );
@@ -621,13 +641,58 @@ function titleCase(value) {
     .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
-function discountAmount(discount, gross) {
+function numberValue(value) {
+  const parsed = Number(String(value ?? "").replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function discountDetails(discount, pcs, rate) {
   const raw = String(discount || "").trim();
-  if (!raw) return 0;
+  if (!raw) return { amount: 0, type: "" };
+  const pieces = Math.max(0, numberValue(pcs));
+  const unitRate = Math.max(0, numberValue(rate));
+  if (!pieces || !unitRate) return { amount: 0, type: raw.endsWith("%") ? "percent" : "rupee" };
+
   if (raw.endsWith("%")) {
-    return Math.min(gross, Math.max(0, gross * Number(raw.slice(0, -1) || 0) / 100));
+    const percentage = Math.min(100, Math.max(0, numberValue(raw.slice(0, -1))));
+    return {
+      amount: pieces * (unitRate * percentage / 100),
+      type: "percent",
+    };
   }
-  return Math.min(gross, Math.max(0, Number(raw || 0)));
+  return {
+    amount: pieces * Math.min(unitRate, Math.max(0, numberValue(raw))),
+    type: "rupee",
+  };
+}
+
+function invoiceTotals(articles, salesReturnInput, receivedInput) {
+  const grossAmount = articles.reduce((sum, article) => sum + Number(article.gross_amount || 0), 0);
+  const percentDiscountAmount = articles.reduce(
+    (sum, article) => sum + (article.discount_type === "percent" ? Number(article.discount_amount || 0) : 0),
+    0
+  );
+  const rupeeDiscountAmount = articles.reduce(
+    (sum, article) => sum + (article.discount_type === "rupee" ? Number(article.discount_amount || 0) : 0),
+    0
+  );
+  const totalDiscountAmount = percentDiscountAmount + rupeeDiscountAmount;
+  const netAmount = Math.max(0, grossAmount - totalDiscountAmount);
+  const salesReturnAmount = Math.min(netAmount, Math.max(0, numberValue(salesReturnInput)));
+  const receivedAmount = Math.max(0, numberValue(receivedInput));
+  const totalAmount = Math.max(0, netAmount - salesReturnAmount);
+  return {
+    gross_amount: grossAmount,
+    percent_discount_amount: percentDiscountAmount,
+    rupee_discount_amount: rupeeDiscountAmount,
+    total_discount_amount: totalDiscountAmount,
+    net_amount: netAmount,
+    sales_return_amount: salesReturnAmount,
+    received_amount: receivedAmount,
+    total_amount: totalAmount,
+    balance_amount: Math.max(0, totalAmount - receivedAmount),
+    return_amount: Math.max(0, receivedAmount - totalAmount),
+  };
 }
 
 function normalizeInvoiceItem(article, index) {
@@ -636,7 +701,8 @@ function normalizeInvoiceItem(article, index) {
   const rate = Math.max(0, Number(article?.rate || 0));
   const gross = pcs * rate;
   const discount = String(article?.discount || "").trim();
-  const calculatedDiscount = discountAmount(discount, gross);
+  const calculatedDiscount = discountDetails(discount, pcs, rate);
+  const discountAmount = Math.min(gross, calculatedDiscount.amount);
   return {
     position: index + 1,
     size: String(article?.size || "").trim(),
@@ -644,9 +710,11 @@ function normalizeInvoiceItem(article, index) {
     dzn,
     pcs,
     rate,
+    gross_amount: gross,
     discount,
-    discount_amount: calculatedDiscount,
-    amount: Math.max(0, gross - calculatedDiscount),
+    discount_type: calculatedDiscount.type,
+    discount_amount: discountAmount,
+    amount: Math.max(0, gross - discountAmount),
   };
 }
 
@@ -658,7 +726,9 @@ function toInvoiceItemDto(row) {
     dzn: Number(row.dzn || 0),
     pcs: Number(row.pcs || 0),
     rate: Number(row.rate || 0),
+    gross_amount: Number(row.gross_amount || (Number(row.pcs || 0) * Number(row.rate || 0))),
     discount: row.discount || "",
+    discount_type: row.discount_type || "",
     discount_amount: Number(row.discount_amount || 0),
     amount: Number(row.amount || 0),
   };
@@ -674,6 +744,6 @@ app.use((error, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`TexTradeOS backend running on http://localhost:${PORT}`);
+  console.log(`TexTradeOS PRO backend running on http://localhost:${PORT}`);
   console.log("Fresh-install logins: developer/developer123, admin/admin123");
 });

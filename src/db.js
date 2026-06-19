@@ -85,8 +85,18 @@ const createTables = () => {
       invoice_number TEXT NOT NULL,
       invoice_date TEXT NOT NULL,
       customer_name TEXT NOT NULL,
+      customer_urdu_title TEXT DEFAULT '',
       customer_phone TEXT DEFAULT '',
       customer_address TEXT DEFAULT '',
+      gross_amount REAL NOT NULL DEFAULT 0,
+      percent_discount_amount REAL NOT NULL DEFAULT 0,
+      rupee_discount_amount REAL NOT NULL DEFAULT 0,
+      total_discount_amount REAL NOT NULL DEFAULT 0,
+      net_amount REAL NOT NULL DEFAULT 0,
+      sales_return_amount REAL NOT NULL DEFAULT 0,
+      received_amount REAL NOT NULL DEFAULT 0,
+      balance_amount REAL NOT NULL DEFAULT 0,
+      return_amount REAL NOT NULL DEFAULT 0,
       total_amount REAL NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -104,7 +114,9 @@ const createTables = () => {
       dzn REAL NOT NULL DEFAULT 0,
       pcs REAL NOT NULL DEFAULT 0,
       rate REAL NOT NULL DEFAULT 0,
+      gross_amount REAL NOT NULL DEFAULT 0,
       discount TEXT DEFAULT '',
+      discount_type TEXT DEFAULT '',
       discount_amount REAL NOT NULL DEFAULT 0,
       amount REAL NOT NULL DEFAULT 0,
       FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
@@ -119,6 +131,31 @@ const createTables = () => {
   if (!userColumns.some((column) => column.name === "shortcuts")) {
     db.exec("ALTER TABLE users ADD COLUMN shortcuts TEXT NOT NULL DEFAULT '{}'");
   }
+  const invoiceColumns = db.prepare("PRAGMA table_info(invoices)").all();
+  const addInvoiceColumn = (name, definition) => {
+    if (!invoiceColumns.some((column) => column.name === name)) {
+      db.exec(`ALTER TABLE invoices ADD COLUMN ${name} ${definition}`);
+    }
+  };
+  addInvoiceColumn("customer_urdu_title", "TEXT DEFAULT ''");
+  addInvoiceColumn("gross_amount", "REAL NOT NULL DEFAULT 0");
+  addInvoiceColumn("percent_discount_amount", "REAL NOT NULL DEFAULT 0");
+  addInvoiceColumn("rupee_discount_amount", "REAL NOT NULL DEFAULT 0");
+  addInvoiceColumn("total_discount_amount", "REAL NOT NULL DEFAULT 0");
+  addInvoiceColumn("net_amount", "REAL NOT NULL DEFAULT 0");
+  addInvoiceColumn("sales_return_amount", "REAL NOT NULL DEFAULT 0");
+  addInvoiceColumn("received_amount", "REAL NOT NULL DEFAULT 0");
+  addInvoiceColumn("balance_amount", "REAL NOT NULL DEFAULT 0");
+  addInvoiceColumn("return_amount", "REAL NOT NULL DEFAULT 0");
+
+  const itemColumns = db.prepare("PRAGMA table_info(invoice_items)").all();
+  const addItemColumn = (name, definition) => {
+    if (!itemColumns.some((column) => column.name === name)) {
+      db.exec(`ALTER TABLE invoice_items ADD COLUMN ${name} ${definition}`);
+    }
+  };
+  addItemColumn("gross_amount", "REAL NOT NULL DEFAULT 0");
+  addItemColumn("discount_type", "TEXT DEFAULT ''");
 };
 
 const seed = () => {
@@ -131,7 +168,7 @@ const seed = () => {
         created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      "TexTradeOS",
+      "TexTradeOS PRO",
       "",
       0,
       createdAt,
@@ -200,6 +237,14 @@ export const toUserDto = (row) => {
 
 export const toInvoiceDto = (row, articles = []) => {
   if (!row) return null;
+  const lineGross = articles.reduce((sum, article) => sum + Number(article.gross_amount || 0), 0);
+  const lineDiscount = articles.reduce((sum, article) => sum + Number(article.discount_amount || 0), 0);
+  const grossAmount = Number(row.gross_amount || lineGross || row.total_amount || 0);
+  const totalDiscountAmount = Number(row.total_discount_amount || lineDiscount || 0);
+  const netAmount = Number(row.net_amount || Math.max(0, grossAmount - totalDiscountAmount));
+  const salesReturnAmount = Number(row.sales_return_amount || 0);
+  const totalAmount = Number(row.total_amount || Math.max(0, netAmount - salesReturnAmount));
+  const receivedAmount = Number(row.received_amount || 0);
   return {
     _id: String(row.id),
     id: String(row.id),
@@ -207,11 +252,21 @@ export const toInvoiceDto = (row, articles = []) => {
     invoice_number: row.invoice_number,
     invoice_date: row.invoice_date,
     customer_name: row.customer_name,
+    customer_urdu_title: row.customer_urdu_title || "",
     customer_phone: row.customer_phone || "",
     customer_address: row.customer_address || "",
     order_count: articles.length || Number(row.order_count || 0),
     articles,
-    total_amount: Number(row.total_amount || 0),
+    gross_amount: grossAmount,
+    percent_discount_amount: Number(row.percent_discount_amount || 0),
+    rupee_discount_amount: Number(row.rupee_discount_amount || 0),
+    total_discount_amount: totalDiscountAmount,
+    net_amount: netAmount,
+    sales_return_amount: salesReturnAmount,
+    received_amount: receivedAmount,
+    balance_amount: Number(row.balance_amount || Math.max(0, totalAmount - receivedAmount)),
+    return_amount: Number(row.return_amount || Math.max(0, receivedAmount - totalAmount)),
+    total_amount: totalAmount,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
