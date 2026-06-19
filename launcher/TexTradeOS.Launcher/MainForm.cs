@@ -40,7 +40,7 @@ internal sealed class MainForm : Form
     private readonly Label _brandLabel = new()
     {
         AutoSize  = true,
-        Text      = "TexTradeOS",
+        Text      = "TexTradeOS PRO",
         Font      = new Font("Segoe UI", 12f, FontStyle.Regular),
         ForeColor = BrandTeal,
         BackColor = Color.Transparent,
@@ -60,7 +60,7 @@ internal sealed class MainForm : Form
     private readonly Label _subLabel = new()
     {
         AutoSize  = true,
-        Text      = "Starting services, hang tight",
+        Text      = "A Product of SparkPair",
         Font      = new Font("Segoe UI", 9f),
         ForeColor = TextMuted,
         BackColor = Color.Transparent,
@@ -117,7 +117,7 @@ internal sealed class MainForm : Form
         _preview     = preview;
         _fingerprint = preview ? new FingerprintDocument() : FingerprintService.Create();
 
-        Text            = "TexTradeOS";
+        Text            = "TexTradeOS PRO";
         FormBorderStyle = FormBorderStyle.None;
         StartPosition   = FormStartPosition.CenterScreen;
         ClientSize      = new Size(FormW, FormH);
@@ -311,7 +311,7 @@ internal sealed class MainForm : Form
 
             if (_preview)
             {
-                Text = "TexTradeOS Splash Preview";
+                Text = "TexTradeOS PRO Splash Preview";
                 _versionLabel.Text = "Preview - click or press Esc to close";
                 AdvancePreview();
                 _previewTimer.Start();
@@ -320,7 +320,7 @@ internal sealed class MainForm : Form
 
             if (_openOnly)
             {
-                SetStatus("Opening TexTradeOS...", 90, "Launching...");
+                SetStatus("Opening TexTradeOS PRO...", 90, "Launching...");
                 await EnsureMinimumSplashTimeAsync(shownAt);
                 var lic = LicenseService.Validate(DeploymentService.LicensePath, _fingerprint);
                 _deployment.OpenApplication(!lic.Allowed);
@@ -336,10 +336,10 @@ internal sealed class MainForm : Form
                 throw new InvalidOperationException(
                     "Docker Desktop is not installed or the Docker engine could not start.");
 
-            SetStatus("Starting TexTradeOS services...", 70, "Services up");
+            SetStatus("Starting TexTradeOS PRO services...", 70, "Services up");
             await _deployment.StartAsync(Log);
 
-            SetStatus("Opening TexTradeOS...", 95, "Launching...");
+            SetStatus("Opening TexTradeOS PRO...", 95, "Launching...");
             var license = LicenseService.Validate(DeploymentService.LicensePath, _fingerprint);
             await EnsureMinimumSplashTimeAsync(shownAt);
             _deployment.OpenApplication(!license.Allowed);
@@ -354,7 +354,7 @@ internal sealed class MainForm : Form
         {
             _spinTimer.Stop();
             SetStatus(error.Message, -1, "Error");
-            MessageBox.Show(error.Message, "TexTradeOS",
+            MessageBox.Show(error.Message, "TexTradeOS PRO",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
@@ -365,8 +365,8 @@ internal sealed class MainForm : Form
         {
             ("Preparing application files...", 20, "Files ready"),
             ("Starting Docker Desktop...",     45, "Docker up"),
-            ("Starting TexTradeOS services...", 70, "Services up"),
-            ("Opening TexTradeOS...",           95, "Launching..."),
+            ("Starting TexTradeOS PRO services...", 70, "Services up"),
+            ("Opening TexTradeOS PRO...",           95, "Launching..."),
         };
         var (text, pct, right) = steps[_previewStep++ % steps.Length];
         SetStatus(text, pct, right);
@@ -387,9 +387,9 @@ internal sealed class MainForm : Form
                 TopMost = true;
                 Show();
                 BringToFront();
-                SetStatus("Installing TexTradeOS update...", 55, "Updating...");
+                SetStatus("Installing TexTradeOS PRO update...", 55, "Updating...");
                 await _deployment.ProcessRequestedUpdateAsync(Log);
-                SetStatus("Opening updated TexTradeOS...", 100, "Ready");
+                SetStatus("Opening updated TexTradeOS PRO...", 100, "Ready");
             }
         }
         catch (Exception error) { Log($"Background operation failed: {error.Message}"); }

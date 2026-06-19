@@ -1,6 +1,6 @@
-#define MyAppName "TexTradeOS"
+#define MyAppName "TexTradeOS PRO"
 #define MyAppVersion GetEnv("TEXTRADEOS_VERSION")
-#define MyAppPublisher "Spark Pair"
+#define MyAppPublisher "SparkPair"
 #define MyAppExeName "TexTradeOS.exe"
 
 [Setup]
@@ -8,10 +8,10 @@ AppId={{B7CC92F9-387C-4E04-91C4-A687BF3B3BE7}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={autopf}\TexTradeOS
-DefaultGroupName=TexTradeOS
+DefaultDirName={autopf}\TexTradeOS PRO
+DefaultGroupName=TexTradeOS PRO
 OutputDir=..\artifacts\installer
-OutputBaseFilename=TexTradeOS-Setup-{#MyAppVersion}
+OutputBaseFilename=TexTradeOS-PRO-Setup-{#MyAppVersion}
 Compression=lzma2
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
@@ -25,11 +25,11 @@ UninstallDisplayIcon={app}\TexTradeOS.exe
 Source: "..\artifacts\launcher\TexTradeOS.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{autodesktop}\TexTradeOS"; Filename: "{app}\TexTradeOS.exe"
-Name: "{group}\TexTradeOS"; Filename: "{app}\TexTradeOS.exe"
+Name: "{autodesktop}\TexTradeOS PRO"; Filename: "{app}\TexTradeOS.exe"
+Name: "{group}\TexTradeOS PRO"; Filename: "{app}\TexTradeOS.exe"
 
 [Run]
-Filename: "{app}\TexTradeOS.exe"; Description: "Launch TexTradeOS"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\TexTradeOS.exe"; Description: "Launch TexTradeOS PRO"; Flags: nowait postinstall skipifsilent
 
 [Code]
 function PrepareToInstall(var NeedsRestart: Boolean): String;

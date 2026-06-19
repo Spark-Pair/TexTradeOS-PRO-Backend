@@ -1,7 +1,7 @@
 {
   "name": "textradeosbackend",
   "version": "1.0.0",
-  "description": "Express + SQLite backend for TexTradeOS",
+  "description": "Express + SQLite backend for TexTradeOS PRO by SparkPair",
   "main": "src/server.js",
   "scripts": {
     "dev": "node --env-file=.env.development --watch src/server.js",

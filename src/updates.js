@@ -89,7 +89,7 @@ export const checkForUpdate = async () => {
 
   try {
     const response = await fetch(process.env.UPDATE_METADATA_URL || DEFAULT_UPDATE_URL, {
-      headers: { Accept: "application/json", "User-Agent": `TexTradeOS/${currentVersion}` },
+      headers: { Accept: "application/json", "User-Agent": `TexTradeOS-PRO/${currentVersion}` },
       signal: AbortSignal.timeout(10000),
     });
     if (!response.ok) throw new Error(`Update server returned HTTP ${response.status}`);
