@@ -86,6 +86,7 @@ const createTables = () => {
       invoice_date TEXT NOT NULL,
       customer_name TEXT NOT NULL,
       customer_urdu_title TEXT DEFAULT '',
+      salesman_name TEXT DEFAULT '',
       customer_phone TEXT DEFAULT '',
       customer_address TEXT DEFAULT '',
       gross_amount REAL NOT NULL DEFAULT 0,
@@ -138,6 +139,7 @@ const createTables = () => {
     }
   };
   addInvoiceColumn("customer_urdu_title", "TEXT DEFAULT ''");
+  addInvoiceColumn("salesman_name", "TEXT DEFAULT ''");
   addInvoiceColumn("gross_amount", "REAL NOT NULL DEFAULT 0");
   addInvoiceColumn("percent_discount_amount", "REAL NOT NULL DEFAULT 0");
   addInvoiceColumn("rupee_discount_amount", "REAL NOT NULL DEFAULT 0");
@@ -253,6 +255,7 @@ export const toInvoiceDto = (row, articles = []) => {
     invoice_date: row.invoice_date,
     customer_name: row.customer_name,
     customer_urdu_title: row.customer_urdu_title || "",
+    salesman_name: row.salesman_name || "",
     customer_phone: row.customer_phone || "",
     customer_address: row.customer_address || "",
     order_count: articles.length || Number(row.order_count || 0),

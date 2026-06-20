@@ -462,6 +462,7 @@ app.get("/api/invoices/:id", requireAuth, (req, res) => {
 app.post("/api/invoices", requireAuth, (req, res) => {
   const customerName = titleCase(req.body?.customer_name);
   const customerUrduTitle = String(req.body?.customer_urdu_title || "").trim();
+  const salesmanName = titleCase(req.body?.salesman_name);
   const invoiceDate = String(req.body?.invoice_date || new Date().toISOString().slice(0, 10));
   const articles = Array.isArray(req.body?.articles) ? req.body.articles : [];
   if (!customerName) return res.status(400).json({ message: "Customer name is required" });
@@ -493,11 +494,11 @@ app.post("/api/invoices", requireAuth, (req, res) => {
     const result = db.prepare(`
       INSERT INTO invoices (
         business_id, created_by, invoice_number, invoice_date, customer_name,
-        customer_urdu_title, customer_phone, customer_address, gross_amount,
+        customer_urdu_title, salesman_name, customer_phone, customer_address, gross_amount,
         percent_discount_amount, rupee_discount_amount, total_discount_amount,
         net_amount, sales_return_amount, received_amount, balance_amount,
         return_amount, total_amount, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       req.user.business_id,
       req.user.id,
@@ -505,6 +506,7 @@ app.post("/api/invoices", requireAuth, (req, res) => {
       invoiceDate,
       customerName,
       customerUrduTitle,
+      salesmanName,
       String(req.body?.customer_phone || "").trim(),
       String(req.body?.customer_address || "").trim(),
       totals.gross_amount,
