@@ -668,6 +668,7 @@ internal sealed class MainForm : Form
         if (_processing) return;
         _processing = true;
         var updateRequested = File.Exists(DeploymentService.UpdateRequestPath);
+        var launcherUpdateStarted = false;
 
         try
         {
@@ -682,8 +683,13 @@ internal sealed class MainForm : Form
 
                 _animationStartedAtUtc = DateTime.UtcNow;
                 SetStatus("Installing TexTradeOS PRO update...", 55, "Updating...");
-                await _deployment.ProcessRequestedUpdateAsync(Log);
-                SetStatus("Opening updated TexTradeOS PRO...", 100, "Ready");
+                launcherUpdateStarted = await _deployment.ProcessRequestedUpdateAsync(Log);
+                SetStatus(
+                    launcherUpdateStarted
+                        ? "Updating TexTradeOS PRO launcher..."
+                        : "Opening updated TexTradeOS PRO...",
+                    100,
+                    "Ready");
             }
         }
         catch (Exception error)
@@ -695,7 +701,7 @@ internal sealed class MainForm : Form
             if (updateRequested)
             {
                 await Task.Delay(700);
-                _deployment.OpenApplication();
+                if (!launcherUpdateStarted) _deployment.OpenApplication();
                 ShowInTaskbar = false;
                 TopMost = false;
                 Hide();

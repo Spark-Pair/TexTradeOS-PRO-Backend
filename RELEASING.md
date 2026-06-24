@@ -72,6 +72,13 @@ Container-only releases update automatically. When a release requires a newer
 launcher, increase `minimumLauncherVersion` in the release metadata generation
 and have customers run the new setup executable from the GitHub Release.
 
+Launchers that include the self-update flow can download and run the release's
+`TexTradeOS-PRO-Setup-X.Y.Z.exe` after the container update succeeds. This
+updates bundled launcher UI such as the splash screen without a manual GitHub
+download, although Windows can still show an administrator/UAC prompt. Older
+launchers that do not include this flow must run the new setup executable once
+before future launcher UI changes can be applied automatically.
+
 Release `1.1.0` is the transition to the hidden launcher agent and web-based
 system management. Existing `1.0.0` installations must run the `1.1.0` setup
 once. Later container-only updates can be installed entirely from the web app.
