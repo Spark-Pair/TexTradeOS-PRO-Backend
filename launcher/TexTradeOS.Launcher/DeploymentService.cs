@@ -199,7 +199,7 @@ MANAGEMENT_SECRET={managementSecret}
         return CompareVersions(metadata.Version, current) > 0 ? metadata : null;
     }
 
-    internal async Task InstallUpdateAsync(UpdateMetadata update, Action<string> log)
+    internal async Task<bool> InstallUpdateAsync(UpdateMetadata update, Action<string> log)
     {
         if (!IsTrusted(update)) throw new InvalidOperationException("Update metadata is not trusted.");
         var launcherVersion = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(1, 0, 0);
@@ -227,6 +227,7 @@ MANAGEMENT_SECRET={managementSecret}
             File.Delete(UpdateRequestPath);
             await StartAsync(log);
             PruneBackups();
+            return await StartLauncherUpdateIfNeededAsync(update, log);
         }
         catch
         {
@@ -252,11 +253,11 @@ MANAGEMENT_SECRET={managementSecret}
         catch { return null; }
     }
 
-    internal async Task ProcessRequestedUpdateAsync(Action<string> log)
+    internal async Task<bool> ProcessRequestedUpdateAsync(Action<string> log)
     {
         var update = ReadRequestedUpdate();
-        if (update is null) return;
-        await InstallUpdateAsync(update, log);
+        if (update is null) return false;
+        return await InstallUpdateAsync(update, log);
     }
 
     internal async Task ProcessPendingCommandsAsync(
@@ -450,11 +451,78 @@ MANAGEMENT_SECRET={managementSecret}
     private void WriteEnvironment(Dictionary<string, string> values) =>
         File.WriteAllLines(EnvironmentPath, values.Select(item => $"{item.Key}={item.Value}"));
 
+    private async Task<bool> StartLauncherUpdateIfNeededAsync(UpdateMetadata update, Action<string> log)
+    {
+        try
+        {
+            var launcherVersion = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0);
+            if (!Version.TryParse(update.Version, out var updateVersion) || launcherVersion >= updateVersion)
+                return false;
+
+            var setupUrl = string.IsNullOrWhiteSpace(update.LauncherSetupUrl)
+                ? BuildLauncherSetupUrl(update)
+                : update.LauncherSetupUrl;
+            if (!IsTrustedLauncherSetupUrl(setupUrl))
+            {
+                log("Launcher setup URL is not trusted; skipping launcher self-update.");
+                return false;
+            }
+
+            Directory.CreateDirectory(DataDirectory);
+            var installerPath = Path.Combine(DataDirectory, $"TexTradeOS-PRO-Setup-{update.Version}.exe");
+            var temporaryPath = $"{installerPath}.download";
+
+            log($"Downloading TexTradeOS launcher {update.Version}...");
+            using (var client = new HttpClient { Timeout = TimeSpan.FromMinutes(10) })
+            using (var response = await client.GetAsync(setupUrl))
+            {
+                response.EnsureSuccessStatusCode();
+                await using var source = await response.Content.ReadAsStreamAsync();
+                await using var destination = File.Create(temporaryPath);
+                await source.CopyToAsync(destination);
+            }
+            File.Move(temporaryPath, installerPath, true);
+
+            log($"Starting TexTradeOS launcher installer {update.Version}...");
+            var launcherPath = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "TexTradeOS.exe");
+            var script = $"""
+                $ErrorActionPreference = 'Stop'
+                Start-Process -FilePath '{PowerShellLiteral(installerPath)}' -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS' -Wait
+                Start-Process -FilePath '{PowerShellLiteral(launcherPath)}'
+                """;
+            var encodedScript = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+            Process.Start(new ProcessStartInfo(
+                "powershell.exe",
+                $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encodedScript}")
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+            });
+            return true;
+        }
+        catch (Exception error)
+        {
+            log($"Launcher self-update could not be started: {error.Message}");
+            return false;
+        }
+    }
+
+    private static string BuildLauncherSetupUrl(UpdateMetadata update) =>
+        $"https://github.com/Spark-Pair/TexTradeOS-PRO-Backend/releases/download/v{update.Version}/TexTradeOS-PRO-Setup-{update.Version}.exe";
+
     private static bool IsTrusted(UpdateMetadata update) =>
         Version.TryParse(update.Version, out _) &&
         update.ReleaseUrl.StartsWith("https://github.com/Spark-Pair/", StringComparison.OrdinalIgnoreCase) &&
+        (string.IsNullOrWhiteSpace(update.LauncherSetupUrl) ||
+         IsTrustedLauncherSetupUrl(update.LauncherSetupUrl)) &&
         update.FrontendImage.StartsWith("ghcr.io/spark-pair/textradeos-frontend@sha256:", StringComparison.OrdinalIgnoreCase) &&
         update.BackendImage.StartsWith("ghcr.io/spark-pair/textradeos-backend@sha256:", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsTrustedLauncherSetupUrl(string url) =>
+        url.StartsWith(
+            "https://github.com/Spark-Pair/TexTradeOS-PRO-Backend/releases/download/",
+            StringComparison.OrdinalIgnoreCase) &&
+        url.EndsWith(".exe", StringComparison.OrdinalIgnoreCase);
 
     private static int CompareVersions(string left, string right)
     {
@@ -490,5 +558,6 @@ MANAGEMENT_SECRET={managementSecret}
     }
 
     private static string Quote(string value) => $"\"{value.Replace("\"", "\\\"")}\"";
+    private static string PowerShellLiteral(string value) => value.Replace("'", "''");
     private sealed record ProcessResult(int ExitCode, string Output, string Error);
 }

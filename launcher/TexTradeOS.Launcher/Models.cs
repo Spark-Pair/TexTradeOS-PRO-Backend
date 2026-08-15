@@ -34,6 +34,7 @@ internal sealed class UpdateMetadata
     [JsonPropertyName("releaseUrl")] public string ReleaseUrl { get; set; } = "";
     [JsonPropertyName("notes")] public string Notes { get; set; } = "";
     [JsonPropertyName("minimumLauncherVersion")] public string MinimumLauncherVersion { get; set; } = "0.0.0";
+    [JsonPropertyName("launcherSetupUrl")] public string LauncherSetupUrl { get; set; } = "";
     [JsonPropertyName("frontendImage")] public string FrontendImage { get; set; } = "";
     [JsonPropertyName("backendImage")] public string BackendImage { get; set; } = "";
 }
