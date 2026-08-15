@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { v4 as uuidv4 } from "uuid";
 
 const values = process.argv.slice(2);
 const valueFor = (name) => {
@@ -18,7 +19,7 @@ const keyPath = path.join(os.homedir(), ".textradeos-license-keys", "private.pem
 const request = JSON.parse(fs.readFileSync(requestPath, "utf8").replace(/^\uFEFF/, ""));
 const payload = {
   schemaVersion: 1,
-  licenseId: crypto.randomUUID(),
+  licenseId: uuidv4(),
   customer,
   issuedAt: new Date().toISOString(),
   minimumMatches: 3,

@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { v4 as uuidv4 } from "uuid";
 
 const dataDirectory = path.dirname(path.resolve(process.env.DATABASE_PATH || "./textradeos.sqlite"));
 const commandDirectory = path.join(dataDirectory, "launcher-commands");
@@ -17,7 +18,7 @@ const ensureDirectories = () => {
 export const submitLauncherCommand = (type, payload = {}) => {
   if (!managementSecret) throw new Error("Launcher management is not configured");
   ensureDirectories();
-  const id = crypto.randomUUID();
+  const id = uuidv4();
   const command = {
     id,
     type,

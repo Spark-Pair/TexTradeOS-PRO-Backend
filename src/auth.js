@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import crypto from "node:crypto";
 import { db, toUserDto } from "./db.js";
+import { v4 as uuidv4 } from "uuid";
 
 const isProduction = process.env.NODE_ENV === "production";
 const readSecret = (name, developmentFallback) => {
@@ -19,7 +20,7 @@ export const signAccessToken = (user) =>
 export const signRefreshToken = (user, sessionId) =>
   jwt.sign({ sub: String(user.id), sid: sessionId }, JWT_REFRESH_SECRET, { expiresIn: "30d" });
 
-export const newSessionId = () => crypto.randomUUID();
+export const newSessionId = () => uuidv4();
 
 export const getUserById = (id) =>
   db.prepare(`
