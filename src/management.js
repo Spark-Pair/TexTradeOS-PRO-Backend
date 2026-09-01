@@ -2,13 +2,16 @@ import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
 
 const dataDirectory = path.dirname(path.resolve(process.env.DATABASE_PATH || "./textradeos.sqlite"));
 const commandDirectory = path.join(dataDirectory, "launcher-commands");
 const resultDirectory = path.join(dataDirectory, "launcher-results");
 const backupDirectory = path.resolve(process.env.BACKUP_PATH || "/backups");
+const restoreUploadDirectory = path.join(dataDirectory, "restore-uploads");
 const managementSecret = String(process.env.MANAGEMENT_SECRET || "");
+const databasePath = path.resolve(process.env.DATABASE_PATH || "./textradeos.sqlite");
 
 const ensureDirectories = () => {
   fs.mkdirSync(commandDirectory, { recursive: true });
@@ -58,6 +61,91 @@ export const listBackups = () => {
     return [];
   }
 };
+
+export const submitSystemCommand = (type, payload = {}) => {
+  if (managementSecret) return submitLauncherCommand(type, payload);
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("Launcher management is not configured");
+  }
+
+  ensureDirectories();
+  const id = uuidv4();
+  const resultPath = path.join(resultDirectory, `${id}.json`);
+  setImmediate(async () => {
+    try {
+      let result;
+      if (type === "backup") {
+        fs.mkdirSync(backupDirectory, { recursive: true });
+        const stamp = new Date().toISOString().replace(/\D/g, "");
+        const name = `textradeos-${stamp.slice(0, 8)}-${stamp.slice(8, 14)}.sqlite`;
+        const source = new Database(databasePath, { readonly: true });
+        try { await source.backup(path.join(backupDirectory, name)); } finally { source.close(); }
+        result = { backup: name };
+      } else if (type === "restore" || type === "restore-upload") {
+        const uploaded = type === "restore-upload";
+        const sourcePath = uploaded
+          ? path.join(restoreUploadDirectory, String(payload.fileName || ""))
+          : getBackupPath(payload.backup);
+        if (!sourcePath || !fs.existsSync(sourcePath)) throw new Error("Selected backup does not exist");
+        const source = new Database(sourcePath, { readonly: true, fileMustExist: true });
+        try {
+          const integrity = source.pragma("integrity_check", { simple: true });
+          const tables = new Set(source.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
+          if (integrity !== "ok" || ["businesses", "users", "invoices", "invoice_items"].some((name) => !tables.has(name))) {
+            throw new Error("Invalid TexTradeOS database backup");
+          }
+          await source.backup(databasePath);
+        } finally {
+          source.close();
+          if (uploaded) fs.rmSync(sourcePath, { force: true });
+        }
+        result = { restored: true };
+      } else if (type === "firewall") {
+        throw new Error("Firewall configuration is only available through the installed launcher");
+      } else {
+        throw new Error("Unsupported system operation");
+      }
+      fs.writeFileSync(resultPath, JSON.stringify({ id, state: "completed", result }));
+    } catch (error) {
+      fs.writeFileSync(resultPath, JSON.stringify({ id, state: "failed", message: error.message }));
+    }
+  });
+  return { id, state: "queued", execution: "local" };
+};
+
+export const getBackupPath = (name) => {
+  const fileName = String(name || "");
+  if (!/^textradeos-\d{8}-\d{6}\.sqlite$/i.test(fileName)) return null;
+  const filePath = path.join(backupDirectory, fileName);
+  return fs.existsSync(filePath) && fs.statSync(filePath).isFile() ? filePath : null;
+};
+
+export const stageRestoreUpload = (readable, originalName) => new Promise((resolve, reject) => {
+  fs.mkdirSync(restoreUploadDirectory, { recursive: true });
+  const id = uuidv4();
+  const fileName = `${id}.sqlite`;
+  const filePath = path.join(restoreUploadDirectory, fileName);
+  const output = fs.createWriteStream(filePath, { flags: "wx" });
+  let size = 0;
+  const maximumSize = 2 * 1024 * 1024 * 1024;
+
+  const fail = (error) => {
+    output.destroy();
+    fs.rm(filePath, { force: true }, () => reject(error));
+  };
+
+  readable.on("data", (chunk) => {
+    size += chunk.length;
+    if (size > maximumSize) fail(new Error("Backup file is larger than 2 GB"));
+  });
+  readable.on("error", fail);
+  output.on("error", fail);
+  output.on("finish", () => {
+    if (size < 100) return fs.rm(filePath, { force: true }, () => reject(new Error("Backup file is empty or invalid")));
+    resolve({ fileName, originalName: path.basename(String(originalName || "backup.sqlite")), size });
+  });
+  readable.pipe(output);
+});
 
 export const readFingerprint = () => {
   const configuredPath = path.resolve(process.env.FINGERPRINT_PATH || "./license/fingerprint.json");

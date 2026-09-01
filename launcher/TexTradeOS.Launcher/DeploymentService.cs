@@ -288,6 +288,7 @@ MANAGEMENT_SECRET={managementSecret}
                     "import-license" => ImportLicenseCommand(payload, fingerprint),
                     "backup" => new { path = await BackupAsync(log) },
                     "restore" => await RestoreCommandAsync(payload, log),
+                    "restore-upload" => await RestoreUploadCommandAsync(payload, log),
                     "firewall" => await FirewallCommandAsync(log),
                     _ => throw new InvalidOperationException("Unsupported management command."),
                 };
@@ -337,6 +338,25 @@ MANAGEMENT_SECRET={managementSecret}
         var backupPath = Path.Combine(BackupDirectory, backup);
         await RestoreAsync(backupPath, log);
         return new { backup };
+    }
+
+    private async Task<object> RestoreUploadCommandAsync(JsonElement payload, Action<string> log)
+    {
+        var fileName = payload.GetProperty("fileName").GetString() ?? "";
+        if (!Guid.TryParse(Path.GetFileNameWithoutExtension(fileName), out _) ||
+            !string.Equals(Path.GetExtension(fileName), ".sqlite", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Invalid uploaded backup name.");
+        var uploadDirectory = Path.Combine(DataDirectory, "restore-uploads");
+        var uploadPath = Path.Combine(uploadDirectory, fileName);
+        try
+        {
+            await RestoreAsync(uploadPath, log);
+            return new { fileName };
+        }
+        finally
+        {
+            File.Delete(uploadPath);
+        }
     }
 
     private async Task<object> FirewallCommandAsync(Action<string> log)

@@ -8,6 +8,9 @@ license/
 update-request.json
 update-state.json
 artifacts/
+launcher-commands/
+launcher-results/
+restore-uploads/
 launcher/**/bin/
 launcher/**/obj/
 .launcher-preview/
