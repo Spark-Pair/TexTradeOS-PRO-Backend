@@ -1,0 +1,2 @@
+import { addInvoicePayment,listInvoicePayments } from "../services/payment.service.js";
+export const PaymentController={list(req,res){res.json({success:true,data:listInvoicePayments(req.user.business_id,req.params.invoiceId)});},create(req,res){try{res.status(201).json({success:true,data:addInvoicePayment({businessId:req.user.business_id,userId:req.user.id,invoiceId:req.params.invoiceId,payment:req.body})});}catch(error){res.status(error.status||500).json({message:error.message});}}};
