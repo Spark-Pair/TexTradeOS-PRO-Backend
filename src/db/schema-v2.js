@@ -1,4 +1,5 @@
 import { db } from "../db.js";
+import { migrateSharedCommerceData } from "./migrate-shared-commerce.js";
 
 const hasColumn = (table, column) => db.prepare(`PRAGMA table_info(${table})`).all().some((row) => row.name === column);
 const addColumn = (table, column, definition) => { if (!hasColumn(table, column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); };
@@ -30,4 +31,6 @@ export function ensureCommerceSchemaV2() {
     CREATE INDEX IF NOT EXISTS idx_invoice_payments_invoice ON invoice_payments(invoice_id, payment_date);
     CREATE INDEX IF NOT EXISTS idx_inventory_movements_article ON inventory_movements(business_id, article_no, purchase_number);
   `);
+
+  migrateSharedCommerceData();
 }
