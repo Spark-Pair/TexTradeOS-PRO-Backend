@@ -50,6 +50,10 @@ export const SystemService = {
     return stageRestoreUpload(req, fileName);
   },
 
+  submitRestoreUpload(upload) {
+    return submitSystemCommand("restore-upload", upload);
+  },
+
   submitCommand(type, backup) {
     const allowed = new Set(["backup", "restore", "firewall"]);
     if (!allowed.has(type)) {
