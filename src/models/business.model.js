@@ -2,18 +2,22 @@ import { db } from "../db.js";
 import { now } from "../utils.js";
 
 export const BusinessModel = {
+  findById(id) {
+    return db.prepare("SELECT * FROM businesses WHERE id = ?").get(id);
+  },
+
   findForUser(user) {
-    const businessId = user?.business_id || db.prepare("SELECT id FROM businesses ORDER BY id LIMIT 1").get()?.id;
-    return db.prepare("SELECT * FROM businesses WHERE id = ?").get(businessId);
+    if (!user?.business_id) return null;
+    return this.findById(user.business_id);
   },
 
   updateReferenceData(businessId, referenceData) {
-    db.prepare("UPDATE businesses SET reference_data = ?, updated_at = ? WHERE id = ?")
+    return db.prepare("UPDATE businesses SET reference_data = ?, updated_at = ? WHERE id = ?")
       .run(JSON.stringify(referenceData), now(), businessId);
   },
 
   updateRuleData(businessId, ruleData) {
-    db.prepare("UPDATE businesses SET rule_data = ?, updated_at = ? WHERE id = ?")
+    return db.prepare("UPDATE businesses SET rule_data = ?, updated_at = ? WHERE id = ?")
       .run(JSON.stringify(ruleData), now(), businessId);
   },
 
