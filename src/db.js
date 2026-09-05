@@ -261,7 +261,7 @@ const seed = () => {
     const insertUser = db.prepare(`
       INSERT INTO users (business_id, name, username, password_hash, role, is_active, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, 1, ?, ?)
-    `;
+    `);
 
     [
       { name: "Developer", username: "developer", password: "developer123", role: "developer", businessId },
