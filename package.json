@@ -4,8 +4,8 @@
   "description": "Express + SQLite backend for TexTradeOS PRO by SparkPair",
   "main": "src/server.js",
   "scripts": {
-    "dev": "node --env-file=.env.development --watch src/server.js",
-    "start": "node src/server.js",
+    "dev": "node --env-file=.env.development --import ./src/test-route-hook.js --watch src/server.js",
+    "start": "node --import ./src/test-route-hook.js src/server.js",
     "start:production": "node dist/server.cjs",
     "build": "node scripts/build.mjs",
     "test": "node --test",
