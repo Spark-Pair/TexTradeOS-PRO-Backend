@@ -1,2 +1,10 @@
-import { Router } from 'express'; import { addInvoicePayment,listInvoicePayments } from './payment.service.js';
-export function createPaymentRouter(requireAuth){const r=Router();r.use(requireAuth);r.get('/invoices/:invoiceId',(req,res)=>res.json({success:true,data:listInvoicePayments(req.user.business_id,req.params.invoiceId)}));r.post('/invoices/:invoiceId',(req,res)=>{try{res.status(201).json({success:true,data:addInvoicePayment({businessId:req.user.business_id,userId:req.user.id,invoiceId:req.params.invoiceId,payment:req.body})});}catch(e){res.status(e.status||500).json({message:e.message});}});return r;}
+import { Router } from "express";
+import { PaymentController } from "./payment.controller.js";
+
+export function createPaymentRouter(requireAuth) {
+  const router = Router();
+  router.use(requireAuth);
+  router.get("/invoices/:invoiceId", PaymentController.list);
+  router.post("/invoices/:invoiceId", PaymentController.create);
+  return router;
+}
