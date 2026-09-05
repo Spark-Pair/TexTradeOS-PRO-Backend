@@ -12,6 +12,8 @@ const backupDirectory = path.resolve(process.env.BACKUP_PATH || "/backups");
 const restoreUploadDirectory = path.join(dataDirectory, "restore-uploads");
 const managementSecret = String(process.env.MANAGEMENT_SECRET || "");
 const databasePath = path.resolve(process.env.DATABASE_PATH || "./textradeos.sqlite");
+const isDevelopment = String(process.env.IS_DEVELOPMENT || "").toLowerCase() === "true"
+  || process.env.NODE_ENV === "development";
 
 const ensureDirectories = () => {
   fs.mkdirSync(commandDirectory, { recursive: true });
@@ -63,8 +65,11 @@ export const listBackups = () => {
 };
 
 export const submitSystemCommand = (type, payload = {}) => {
-  if (managementSecret) return submitLauncherCommand(type, payload);
-  if (process.env.NODE_ENV === "production") {
+  // Development runs without the Windows launcher. Even when MANAGEMENT_SECRET
+  // is configured for parity with production, execute recovery operations in
+  // the backend so commands cannot remain queued forever waiting for a launcher.
+  if (managementSecret && !isDevelopment) return submitLauncherCommand(type, payload);
+  if (!isDevelopment && process.env.NODE_ENV === "production") {
     throw new Error("Launcher management is not configured");
   }
 
