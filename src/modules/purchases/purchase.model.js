@@ -4,6 +4,32 @@ export const listPurchases = (businessId) => db.prepare("SELECT * FROM purchases
 export const getPurchase = (businessId, id) => db.prepare("SELECT * FROM purchases WHERE business_id = ? AND id = ?").get(businessId, id);
 export const getPurchaseItems = (id) => db.prepare("SELECT * FROM purchase_items WHERE purchase_id = ? ORDER BY position").all(id);
 
+export const getArticleUsage = (businessId, articleNo, purchaseNumber) => {
+  const invoiceRows = db.prepare(`
+    SELECT i.id, i.invoice_number, i.invoice_date, i.customer_name, ii.pcs
+    FROM invoice_items ii
+    JOIN invoices i ON i.id = ii.invoice_id
+    WHERE i.business_id = ? AND ii.article_no = ?
+      AND (ii.purchase_number = ? OR COALESCE(ii.purchase_number, '') = '')
+    ORDER BY i.invoice_date DESC, i.id DESC
+  `).all(businessId, articleNo, purchaseNumber);
+  const returnRows = db.prepare(`
+    SELECT r.id, r.return_number, r.return_date, r.return_type, r.stock_action, ri.pcs
+    FROM return_items ri
+    JOIN returns r ON r.id = ri.return_id
+    WHERE r.business_id = ? AND ri.article_no = ?
+      AND (ri.purchase_number = ? OR COALESCE(ri.purchase_number, '') = '')
+    ORDER BY r.return_date DESC, r.id DESC
+  `).all(businessId, articleNo, purchaseNumber);
+  return {
+    in_use: invoiceRows.length > 0 || returnRows.length > 0,
+    invoice_count: invoiceRows.length,
+    return_count: returnRows.length,
+    invoices: invoiceRows,
+    returns: returnRows,
+  };
+};
+
 const currentPurchaseSequence = (businessId, year) => {
   const row = db.prepare("SELECT purchase_number FROM purchases WHERE business_id = ? AND purchase_number LIKE ? ORDER BY CAST(SUBSTR(purchase_number, 8) AS INTEGER) DESC LIMIT 1").get(businessId, `P-${year}-%`);
   return Number(String(row?.purchase_number || "").split("-").pop()) || 0;
@@ -16,7 +42,7 @@ const reserveCounter = (businessId, key, count, floor) => {
   const existing = db.prepare("SELECT value FROM commerce_counters WHERE business_id = ? AND counter_key = ?").get(businessId, key);
   const base = Math.max(Number(existing?.value || 0), Number(floor || 0));
   const next = base + count;
-  db.prepare(`INSERT INTO commerce_counters (business_id,counter_key,value) VALUES (?,?,?) ON CONFLICT(business_id,counter_key) DO UPDATE SET value=excluded.value`).run(businessId, key, next);
+  db.prepare("INSERT INTO commerce_counters (business_id,counter_key,value) VALUES (?,?,?) ON CONFLICT(business_id,counter_key) DO UPDATE SET value=excluded.value").run(businessId, key, next);
   return { first: base + 1, last: next };
 };
 
