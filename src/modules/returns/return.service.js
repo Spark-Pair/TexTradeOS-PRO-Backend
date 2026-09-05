@@ -40,19 +40,52 @@ function soldRemaining(businessId, partyId, articleNo, purchaseNumber, linkedInv
   return Math.max(0,sold-returned);
 }
 
+function purchaseRemaining(businessId, partyId, articleNo, purchaseNumber, linkedPurchaseId) {
+  const args=[businessId, articleNo];
+  let purchaseWhere="p.business_id=? AND pi.article_no=?";
+  if (purchaseNumber) { purchaseWhere += " AND p.purchase_number=?"; args.push(purchaseNumber); }
+  if (partyId) { purchaseWhere += " AND p.supplier_id=?"; args.push(partyId); }
+  if (linkedPurchaseId) { purchaseWhere += " AND p.id=?"; args.push(linkedPurchaseId); }
+  const purchased=num(db.prepare(`SELECT COALESCE(SUM(pi.quantity_pcs),0) qty FROM purchase_items pi JOIN purchases p ON p.id=pi.purchase_id WHERE ${purchaseWhere}`).get(...args)?.qty);
+
+  const rargs=[businessId, articleNo];
+  let returnWhere="r.business_id=? AND r.return_type='purchase' AND ri.article_no=?";
+  if (purchaseNumber) { returnWhere += " AND ri.purchase_number=?"; rargs.push(purchaseNumber); }
+  if (partyId) { returnWhere += " AND r.party_id=?"; rargs.push(partyId); }
+  if (linkedPurchaseId) { returnWhere += " AND r.linked_purchase_id=?"; rargs.push(String(linkedPurchaseId)); }
+  const returned=num(db.prepare(`SELECT COALESCE(SUM(ri.pcs),0) qty FROM return_items ri JOIN returns r ON r.id=ri.return_id WHERE ${returnWhere}`).get(...rargs)?.qty);
+
+  return Math.max(0,purchased-returned);
+}
+
+function assertNoDuplicateReturnArticles(items) {
+  const seen=new Set();
+  for (const item of items) {
+    const key=`${item.article_no}::${item.purchase_number||""}`;
+    if (seen.has(key)) throw Object.assign(new Error(`${item.article_no}: duplicate return item`),{status:409});
+    seen.add(key);
+  }
+}
+
 export function createReturn({ businessId, userId, type, body }) {
   if (!['sales','purchase'].includes(type)) throw Object.assign(new Error("Invalid return type"),{status:400});
   const date=text(body.return_date)||new Date().toISOString().slice(0,10); const partyId=text(body.party_id); const partyName=text(body.party_name);
   if (!partyName) throw Object.assign(new Error(type==='sales'?"Customer is required":"Supplier is required"),{status:400});
   const totals=calculateReturnTotals(Array.isArray(body.articles)?body.articles:[], body.adjustment);
+  assertNoDuplicateReturnArticles(totals.items);
   const stockAction=String(body.stock_action||"").startsWith("keep") || totals.adjustment_type.startsWith("keep_") ? "keep_goods" : "return_stock";
   if (type==='sales') for (const item of totals.items) { const remaining=soldRemaining(businessId,partyId,item.article_no,item.purchase_number,body.linked_invoice_id); if (item.pcs>remaining) throw Object.assign(new Error(`${item.article_no}: only ${remaining} pcs are returnable`),{status:409}); }
+  if (type==='purchase') for (const item of totals.items) { const remaining=purchaseRemaining(businessId,partyId,item.article_no,item.purchase_number,body.linked_purchase_id); if (item.pcs>remaining) throw Object.assign(new Error(`${item.article_no}: only ${remaining} pcs are returnable from this purchase`),{status:409}); }
   const timestamp=now(); const number=nextReturnNumber(businessId,type,date);
-  const result=db.prepare(`INSERT INTO returns (business_id,created_by,return_number,return_type,return_date,party_id,party_name,linked_invoice_id,linked_purchase_id,stock_action,adjustment_type,adjustment_value,gross_amount,adjustment_amount,total_amount,total_pcs,notes,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(businessId,userId,number,type,date,partyId||null,partyName,body.linked_invoice_id||null,text(body.linked_purchase_id)||null,stockAction,totals.adjustment_type,totals.adjustment_value,totals.gross_amount,totals.adjustment_amount,totals.total_amount,totals.total_pcs,text(body.notes),timestamp,timestamp);
-  const insertItem=db.prepare("INSERT INTO return_items (return_id,position,article_no,purchase_number,qr_id,source_document_id,description,pcs,rate,gross_amount,amount) VALUES (?,?,?,?,?,?,?,?,?,?,?)");
-  const insertMove=db.prepare("INSERT INTO inventory_movements (business_id,movement_type,article_no,purchase_number,pcs,reference_type,reference_id,notes,created_at) VALUES (?,?,?,?,?,?,?,?,?)");
-  totals.items.forEach(i=>{ insertItem.run(result.lastInsertRowid,i.position,i.article_no,i.purchase_number,i.qr_id,i.source_document_id,i.description,i.pcs,i.rate,i.gross_amount,i.amount); if(stockAction==='return_stock') insertMove.run(businessId,type==='sales'?'sales_return_in':'purchase_return_out',i.article_no,i.purchase_number,type==='sales'?i.pcs:-i.pcs,type+'_return',String(result.lastInsertRowid),'',timestamp); });
-  return getReturn(businessId,result.lastInsertRowid);
+  const create=db.transaction(()=>{
+    const result=db.prepare(`INSERT INTO returns (business_id,created_by,return_number,return_type,return_date,party_id,party_name,linked_invoice_id,linked_purchase_id,stock_action,adjustment_type,adjustment_value,gross_amount,adjustment_amount,total_amount,total_pcs,notes,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(businessId,userId,number,type,date,partyId||null,partyName,body.linked_invoice_id||null,text(body.linked_purchase_id)||null,stockAction,totals.adjustment_type,totals.adjustment_value,totals.gross_amount,totals.adjustment_amount,totals.total_amount,totals.total_pcs,text(body.notes),timestamp,timestamp);
+    const insertItem=db.prepare("INSERT INTO return_items (return_id,position,article_no,purchase_number,qr_id,source_document_id,description,pcs,rate,gross_amount,amount) VALUES (?,?,?,?,?,?,?,?,?,?,?)");
+    const insertMove=db.prepare("INSERT INTO inventory_movements (business_id,movement_type,article_no,purchase_number,pcs,reference_type,reference_id,notes,created_at) VALUES (?,?,?,?,?,?,?,?,?)");
+    totals.items.forEach(i=>{ insertItem.run(result.lastInsertRowid,i.position,i.article_no,i.purchase_number,i.qr_id,i.source_document_id,i.description,i.pcs,i.rate,i.gross_amount,i.amount); if(stockAction==='return_stock') insertMove.run(businessId,type==='sales'?'sales_return_in':'purchase_return_out',i.article_no,i.purchase_number,type==='sales'?i.pcs:-i.pcs,type+'_return',String(result.lastInsertRowid),'',timestamp); });
+    return result.lastInsertRowid;
+  });
+  const id=create();
+  return getReturn(businessId,id);
 }
 
 export function getReturn(businessId,id){ const row=db.prepare("SELECT * FROM returns WHERE id=? AND business_id=?").get(id,businessId); if(!row)return null; return {...row,articles:db.prepare("SELECT * FROM return_items WHERE return_id=? ORDER BY position").all(id),adjustment:{type:row.adjustment_type,value:row.adjustment_value}}; }
