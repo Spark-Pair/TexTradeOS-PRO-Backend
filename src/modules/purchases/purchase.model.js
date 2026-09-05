@@ -1,33 +1,13 @@
-import { db } from "../../db.js";
+import { db } from "../../db/connection.js";
 
 export const listPurchases = (businessId) => db.prepare("SELECT * FROM purchases WHERE business_id = ? ORDER BY purchase_date DESC, created_at DESC").all(businessId);
 export const getPurchase = (businessId, id) => db.prepare("SELECT * FROM purchases WHERE business_id = ? AND id = ?").get(businessId, id);
 export const getPurchaseItems = (id) => db.prepare("SELECT * FROM purchase_items WHERE purchase_id = ? ORDER BY position").all(id);
 
 export const getArticleUsage = (businessId, articleNo, purchaseNumber) => {
-  const invoiceRows = db.prepare(`
-    SELECT i.id, i.invoice_number, i.invoice_date, i.customer_name, ii.pcs
-    FROM invoice_items ii
-    JOIN invoices i ON i.id = ii.invoice_id
-    WHERE i.business_id = ? AND ii.article_no = ?
-      AND (ii.purchase_number = ? OR COALESCE(ii.purchase_number, '') = '')
-    ORDER BY i.invoice_date DESC, i.id DESC
-  `).all(businessId, articleNo, purchaseNumber);
-  const returnRows = db.prepare(`
-    SELECT r.id, r.return_number, r.return_date, r.return_type, r.stock_action, ri.pcs
-    FROM return_items ri
-    JOIN returns r ON r.id = ri.return_id
-    WHERE r.business_id = ? AND ri.article_no = ?
-      AND (ri.purchase_number = ? OR COALESCE(ri.purchase_number, '') = '')
-    ORDER BY r.return_date DESC, r.id DESC
-  `).all(businessId, articleNo, purchaseNumber);
-  return {
-    in_use: invoiceRows.length > 0 || returnRows.length > 0,
-    invoice_count: invoiceRows.length,
-    return_count: returnRows.length,
-    invoices: invoiceRows,
-    returns: returnRows,
-  };
+  const invoiceRows = db.prepare(`SELECT i.id, i.invoice_number, i.invoice_date, i.customer_name, ii.pcs FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id WHERE i.business_id = ? AND ii.article_no = ? AND (ii.purchase_number = ? OR COALESCE(ii.purchase_number, '') = '') ORDER BY i.invoice_date DESC, i.id DESC`).all(businessId, articleNo, purchaseNumber);
+  const returnRows = db.prepare(`SELECT r.id, r.return_number, r.return_date, r.return_type, r.stock_action, ri.pcs FROM return_items ri JOIN returns r ON r.id = ri.return_id WHERE r.business_id = ? AND ri.article_no = ? AND (ri.purchase_number = ? OR COALESCE(ri.purchase_number, '') = '') ORDER BY r.return_date DESC, r.id DESC`).all(businessId, articleNo, purchaseNumber);
+  return { in_use: invoiceRows.length > 0 || returnRows.length > 0, invoice_count: invoiceRows.length, return_count: returnRows.length, invoices: invoiceRows, returns: returnRows };
 };
 
 const currentPurchaseSequence = (businessId, year) => {
@@ -48,13 +28,7 @@ const reserveCounter = (businessId, key, count, floor) => {
 
 const assertUniqueArticleNumbers = (businessId, purchaseId, items) => {
   const seen = new Set();
-  const findExisting = db.prepare(`
-    SELECT p.purchase_number
-    FROM purchase_items pi
-    JOIN purchases p ON p.id = pi.purchase_id
-    WHERE p.business_id = ? AND pi.article_no = ? AND p.id <> ?
-    LIMIT 1
-  `);
+  const findExisting = db.prepare(`SELECT p.purchase_number FROM purchase_items pi JOIN purchases p ON p.id = pi.purchase_id WHERE p.business_id = ? AND pi.article_no = ? AND p.id <> ? LIMIT 1`);
   for (const item of items) {
     const articleNo = String(item.article_no || "").trim();
     if (!articleNo) continue;
@@ -75,13 +49,8 @@ export const savePurchaseRecord = (businessId, userId, purchase, items, { alloca
     let articleSeq = missingCount ? reserveCounter(businessId, "article", missingCount, currentArticleSequence(businessId)).first : 0;
     normalizedItems = items.map((item) => item.article_no ? item : { ...item, article_no: `ART-${String(articleSeq++).padStart(5, "0")}` });
   }
-
   assertUniqueArticleNumbers(businessId, purchase.id, normalizedItems);
-
-  db.prepare(`INSERT INTO purchases (id,business_id,created_by,purchase_number,purchase_date,supplier_id,supplier_name,notes,total_amount,article_count,packet_count,created_at,updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-    ON CONFLICT(id) DO UPDATE SET purchase_date=excluded.purchase_date,supplier_id=excluded.supplier_id,supplier_name=excluded.supplier_name,notes=excluded.notes,total_amount=excluded.total_amount,article_count=excluded.article_count,packet_count=excluded.packet_count,updated_at=excluded.updated_at`)
-    .run(purchase.id,businessId,userId,purchaseNumber,purchase.purchase_date,purchase.supplier_id,purchase.supplier_name,purchase.notes,purchase.total_amount,normalizedItems.length,purchase.packet_count,purchase.created_at,purchase.updated_at);
+  db.prepare(`INSERT INTO purchases (id,business_id,created_by,purchase_number,purchase_date,supplier_id,supplier_name,notes,total_amount,article_count,packet_count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET purchase_date=excluded.purchase_date,supplier_id=excluded.supplier_id,supplier_name=excluded.supplier_name,notes=excluded.notes,total_amount=excluded.total_amount,article_count=excluded.article_count,packet_count=excluded.packet_count,updated_at=excluded.updated_at`).run(purchase.id,businessId,userId,purchaseNumber,purchase.purchase_date,purchase.supplier_id,purchase.supplier_name,purchase.notes,purchase.total_amount,normalizedItems.length,purchase.packet_count,purchase.created_at,purchase.updated_at);
   db.prepare("DELETE FROM purchase_items WHERE purchase_id = ?").run(purchase.id);
   const insert = db.prepare(`INSERT INTO purchase_items (purchase_id,position,article_no,qr_id,description,size,season,category,unit,quantity_dzn,quantity_pcs,quantity_pkt,rate,sale_rate,discount,discount_amount,amount) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   normalizedItems.forEach((item,index) => insert.run(purchase.id,index,item.article_no,item.qr_id,item.description,item.size,item.season,item.category,item.unit,item.quantity_dzn,item.quantity_pcs,item.quantity_pkt,item.rate,item.sale_rate,item.discount,item.discount_amount,item.amount));
