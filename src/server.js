@@ -21,6 +21,7 @@ import {
 } from "./management.js";
 import { asyncHandler, normalizeStringList, now, paginate } from "./utils.js";
 import { ensureCommerceSchemaV2 } from "./db/schema-v2.js";
+import { createCommerceRouter } from "./modules/commerce/commerce.routes.js";
 import { createReturnRouter } from "./modules/returns/return.routes.js";
 import { createPaymentRouter } from "./modules/payments/payment.routes.js";
 import { createReturn } from "./modules/returns/return.service.js";
@@ -341,6 +342,8 @@ app.use("/api", (req, res, next) => {
     update,
   });
 });
+
+app.use("/api", createCommerceRouter(requireAuth));
 
 app.get("/api/users", requireAuth, requireDeveloper, (req, res) => {
   const rows = db.prepare(`${userSelect} ORDER BY users.updated_at DESC`).all().map(toUserDto);
