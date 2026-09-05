@@ -1,5 +1,6 @@
 import "dotenv/config";
 import fs from "node:fs";
+import crypto from "node:crypto";
 import express from "express";
 import cors from "cors";
 import bcrypt from "bcryptjs";
@@ -19,6 +20,13 @@ import {
   stageRestoreUpload,
 } from "./management.js";
 import { asyncHandler, normalizeStringList, now, paginate } from "./utils.js";
+import { ensureCommerceSchemaV2 } from "./db/schema-v2.js";
+import { createReturnRouter } from "./modules/returns/return.routes.js";
+import { createPaymentRouter } from "./modules/payments/payment.routes.js";
+import { createReturn } from "./modules/returns/return.service.js";
+import { addInvoicePayment } from "./modules/payments/payment.service.js";
+
+ensureCommerceSchemaV2();
 
 const app = express();
 const PORT = Number(process.env.PORT || 4000);
@@ -27,10 +35,70 @@ const CORS_ORIGINS = String(process.env.CORS_ORIGIN || "http://localhost:5173")
   .map((value) => value.trim())
   .filter(Boolean);
 const APP_VERSION = process.env.APP_VERSION || "0.0.0";
+const IS_DEVELOPMENT = String(process.env.IS_DEVELOPMENT || "").toLowerCase() === "true";
+const loadQrSecret = () => {
+  if (process.env.QR_CODE_SECRET) return process.env.QR_CODE_SECRET;
+  db.exec("CREATE TABLE IF NOT EXISTS app_secrets (key TEXT PRIMARY KEY, value TEXT NOT NULL, created_at TEXT NOT NULL)");
+  const stored = db.prepare("SELECT value FROM app_secrets WHERE key = ?").get("article_qr_v1");
+  if (stored?.value) return stored.value;
+  const secret = crypto.randomBytes(48).toString("base64url");
+  db.prepare("INSERT INTO app_secrets (key, value, created_at) VALUES (?, ?, ?)").run("article_qr_v1", secret, new Date().toISOString());
+  return secret;
+};
+const QR_SECRET = loadQrSecret();
+const qrKey = crypto.createHash("sha256").update(QR_SECRET).digest();
+db.exec(`CREATE TABLE IF NOT EXISTS article_qr_codes (
+  qr_id TEXT PRIMARY KEY,
+  article_no TEXT NOT NULL,
+  purchase_number TEXT NOT NULL,
+  code TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL
+)`);
+
+const createArticleQr = ({ articleNo, qrId, purchaseNumber }) => {
+  const id = String(qrId || "").trim();
+  if (!id || !articleNo) throw new Error("Article number and permanent QR ID are required");
+  const existing = db.prepare("SELECT * FROM article_qr_codes WHERE qr_id = ?").get(id);
+  if (existing) {
+    if (existing.article_no !== String(articleNo)) throw new Error("Permanent QR identity is already assigned to another article");
+    return existing.code;
+  }
+  const token = crypto.randomBytes(6).toString("base64url");
+  const signature = crypto.createHmac("sha256", qrKey).update(token).digest("base64url").slice(0, 6);
+  const code = `T1.${token}.${signature}`;
+  db.prepare("INSERT OR IGNORE INTO article_qr_codes (qr_id, article_no, purchase_number, code, created_at) VALUES (?, ?, ?, ?, ?)")
+    .run(id, String(articleNo), String(purchaseNumber || ""), code, new Date().toISOString());
+  const saved = db.prepare("SELECT * FROM article_qr_codes WHERE qr_id = ?").get(id);
+  if (!saved || saved.article_no !== String(articleNo)) throw new Error("Permanent QR identity is already assigned to another article");
+  return saved.code;
+};
+
+const readArticleQr = (value) => {
+  const [prefix, token, signature, extra] = String(value || "").trim().split(".");
+  if (!["T1", "TTO1"].includes(prefix) || !token || !signature || ![6, 11, 22].includes(signature.length) || extra) throw new Error("Not a TexTradeOS QR code");
+  const expected = crypto.createHmac("sha256", qrKey).update(token).digest("base64url").slice(0, signature.length);
+  if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) throw new Error("Invalid QR signature");
+  const record = db.prepare("SELECT * FROM article_qr_codes WHERE code = ?").get(String(value).trim());
+  if (!record) throw new Error("Unknown QR code");
+  return { a: record.article_no, q: record.qr_id, p: record.purchase_number };
+};
+const isPrivateNetworkOrigin = (origin) => {
+  if (!IS_DEVELOPMENT) return false;
+  try {
+    const hostname = new URL(origin).hostname;
+    return hostname === "localhost"
+      || hostname === "127.0.0.1"
+      || hostname.startsWith("192.168.")
+      || hostname.startsWith("10.")
+      || /^172\.(1[6-9]|2\d|3[01])\./.test(hostname);
+  } catch {
+    return false;
+  }
+};
 
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || CORS_ORIGINS.includes("*") || CORS_ORIGINS.includes(origin)) {
+    if (!origin || CORS_ORIGINS.includes("*") || CORS_ORIGINS.includes(origin) || isPrivateNetworkOrigin(origin)) {
       return callback(null, true);
     }
     return callback(new Error("Origin is not allowed"));
@@ -110,6 +178,23 @@ app.get("/api/setup/commands/:id", (req, res) => {
 });
 
 app.use("/api", requireLicense);
+
+app.post("/api/qr/article/sign", requireAuth, (req, res) => {
+  try {
+    res.json({ code: createArticleQr(req.body || {}) });
+  } catch (error) {
+    res.status(400).json({ message: error.message || "Could not create QR code" });
+  }
+});
+
+app.post("/api/qr/article/verify", requireAuth, (req, res) => {
+  try {
+    const payload = readArticleQr(req.body?.code);
+    res.json({ valid: true, articleNo: payload.a, qrId: payload.q, purchaseNumber: payload.p });
+  } catch {
+    res.status(400).json({ valid: false, message: "This is not a genuine TexTradeOS article QR code." });
+  }
+});
 
 app.post("/api/auth/login", asyncHandler(async (req, res) => {
   const username = String(req.body?.username || "").trim();
@@ -379,6 +464,28 @@ app.patch("/api/businesses/me/rule-data", requireAuth, requireBusinessAdmin, (re
   res.json({ rule_data: ruleData, reference_data: referenceData });
 });
 
+const SHARED_COLLECTIONS = new Set(["suppliers", "customers", "purchases"]);
+
+app.get("/api/shared-data", requireAuth, (req, res) => {
+  const rows = db.prepare("SELECT collection, payload, updated_at FROM shared_collections WHERE business_id = ?")
+    .all(req.user.business_id);
+  const data = Object.fromEntries(rows.map((row) => [row.collection, parseJson(row.payload, [])]));
+  res.json({ success: true, data });
+});
+
+app.put("/api/shared-data/:collection", requireAuth, (req, res) => {
+  const collection = String(req.params.collection || "").trim().toLowerCase();
+  if (!SHARED_COLLECTIONS.has(collection)) return res.status(400).json({ message: "Unsupported shared collection" });
+  if (!Array.isArray(req.body?.records)) return res.status(400).json({ message: "Records must be an array" });
+  const timestamp = now();
+  db.prepare(`
+    INSERT INTO shared_collections (business_id, collection, payload, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(business_id, collection) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at
+  `).run(req.user.business_id, collection, JSON.stringify(req.body.records), timestamp);
+  res.json({ success: true, data: req.body.records, updatedAt: timestamp });
+});
+
 app.get("/api/businesses/me/invoice-counter", requireAuth, (req, res) => {
   const business = getBusinessForUser(req.user);
   const year = Number(req.query.year || new Date().getFullYear());
@@ -434,6 +541,9 @@ app.get("/api/dashboard/trend", requireAuth, (req, res) => {
   res.json({ success: true, data: { from: dateFrom, to: dateTo, trend } });
 });
 
+app.use("/api/returns", createReturnRouter(requireAuth));
+app.use("/api/payments", createPaymentRouter(requireAuth));
+
 app.get("/api/invoices", requireAuth, (req, res) => {
   const conditions = ["invoices.business_id = ?"];
   const params = [req.user.business_id];
@@ -464,6 +574,18 @@ app.get("/api/invoices", requireAuth, (req, res) => {
 
 app.get("/api/invoices/order-groups", requireAuth, (req, res) => {
   res.json({ success: true, data: [], meta: { last_invoice_date: "" } });
+});
+
+app.get("/api/invoices/shared-ledger", requireAuth, (req, res) => {
+  const invoices = db.prepare("SELECT * FROM invoices WHERE business_id = ? ORDER BY invoice_date DESC, id DESC")
+    .all(req.user.business_id)
+    .map((invoice) => {
+      const articles = db.prepare("SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY position")
+        .all(invoice.id)
+        .map(toInvoiceItemDto);
+      return toInvoiceDto(invoice, articles);
+    });
+  res.json({ success: true, data: invoices });
 });
 
 app.get("/api/invoices/:id", requireAuth, (req, res) => {
@@ -514,8 +636,8 @@ app.post("/api/invoices", requireAuth, (req, res) => {
         customer_urdu_title, salesman_name, customer_phone, customer_address, gross_amount,
         percent_discount_amount, rupee_discount_amount, total_discount_amount,
         net_amount, sales_return_amount, received_amount, balance_amount,
-        return_amount, total_amount, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        return_amount, total_amount, customer_id, customer_kind, walk_in_person, payment_status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       req.user.business_id,
       req.user.id,
@@ -536,24 +658,34 @@ app.post("/api/invoices", requireAuth, (req, res) => {
       totals.balance_amount,
       totals.return_amount,
       totals.total_amount,
+      String(req.body?.customer_id || "").trim() || null,
+      req.body?.customer_kind === "walk_in" ? "walk_in" : "registered",
+      String(req.body?.walk_in_person || "").trim(),
+      "unpaid",
       timestamp,
       timestamp
     );
 
     const insertItem = db.prepare(`
       INSERT INTO invoice_items (
-        invoice_id, position, size, description, dzn, pcs, rate, gross_amount,
+        invoice_id, position, article_no, purchase_number, size, description, unit,
+        quantity_pkt, dzn, pcs, purchase_rate, rate, gross_amount,
         discount, discount_type, discount_amount, amount
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     normalizedArticles.forEach((article) => {
       insertItem.run(
         result.lastInsertRowid,
         article.position,
+        article.article_no,
+        article.purchase_number,
         article.size,
         article.description,
+        article.unit,
+        article.quantity_pkt,
         article.dzn,
         article.pcs,
+        article.purchase_rate,
         article.rate,
         article.gross_amount,
         article.discount,
@@ -562,6 +694,28 @@ app.post("/api/invoices", requireAuth, (req, res) => {
         article.amount
       );
     });
+    const linkedSalesReturn = req.body?.sales_return;
+    if (linkedSalesReturn && Array.isArray(linkedSalesReturn.articles) && linkedSalesReturn.articles.length) {
+      const returnRecord = createReturn({
+        businessId: req.user.business_id,
+        userId: req.user.id,
+        type: "sales",
+        body: {
+          ...linkedSalesReturn,
+          return_date: linkedSalesReturn.return_date || invoiceDate,
+          party_id: String(req.body?.customer_id || "").trim(),
+          party_name: customerName,
+          linked_invoice_id: Number(result.lastInsertRowid),
+        },
+      });
+      db.prepare("UPDATE invoices SET sales_return_amount = ? WHERE id = ?").run(returnRecord.total_amount, result.lastInsertRowid);
+    }
+
+    const immediatePayment = req.body?.payment;
+    if (immediatePayment && Number(immediatePayment.amount || 0) > 0) {
+      addInvoicePayment({ businessId: req.user.business_id, userId: req.user.id, invoiceId: Number(result.lastInsertRowid), payment: immediatePayment });
+    }
+
     db.prepare("UPDATE businesses SET invoice_counter_year = ?, invoice_counter_last = ?, updated_at = ? WHERE id = ?")
       .run(year, nextNo, timestamp, req.user.business_id);
 
@@ -724,8 +878,13 @@ function normalizeInvoiceItem(article, index) {
   const discountAmount = Math.min(gross, calculatedDiscount.amount);
   return {
     position: index + 1,
+    article_no: String(article?.article_no || "").trim(),
+    purchase_number: String(article?.purchase_number || "").trim(),
     size: String(article?.size || "").trim(),
     description: titleCase(article?.description),
+    unit: Math.max(0, Number(article?.unit || 0)),
+    quantity_pkt: Math.max(0, Number(article?.quantity_pkt || 0)),
+    purchase_rate: Math.max(0, Number(article?.purchase_rate || 0)),
     dzn,
     pcs,
     rate,
@@ -740,8 +899,13 @@ function normalizeInvoiceItem(article, index) {
 function toInvoiceItemDto(row) {
   return {
     _id: String(row.id),
+    article_no: row.article_no || "",
+    purchase_number: row.purchase_number || "",
     size: row.size || "",
     description: row.description || "",
+    unit: Number(row.unit || 0),
+    quantity_pkt: Number(row.quantity_pkt || 0),
+    purchase_rate: Number(row.purchase_rate || 0),
     dzn: Number(row.dzn || 0),
     pcs: Number(row.pcs || 0),
     rate: Number(row.rate || 0),

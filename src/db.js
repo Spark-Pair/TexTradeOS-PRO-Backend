@@ -123,6 +123,15 @@ const createTables = () => {
       FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS shared_collections (
+      business_id INTEGER NOT NULL,
+      collection TEXT NOT NULL,
+      payload TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (business_id, collection),
+      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_users_business ON users(business_id);
     CREATE INDEX IF NOT EXISTS idx_invoices_business_date ON invoices(business_id, invoice_date DESC);
     CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id, position);
@@ -158,6 +167,11 @@ const createTables = () => {
   };
   addItemColumn("gross_amount", "REAL NOT NULL DEFAULT 0");
   addItemColumn("discount_type", "TEXT DEFAULT ''");
+  addItemColumn("article_no", "TEXT DEFAULT ''");
+  addItemColumn("purchase_number", "TEXT DEFAULT ''");
+  addItemColumn("unit", "REAL NOT NULL DEFAULT 0");
+  addItemColumn("quantity_pkt", "REAL NOT NULL DEFAULT 0");
+  addItemColumn("purchase_rate", "REAL NOT NULL DEFAULT 0");
 };
 
 const seed = () => {
