@@ -14,6 +14,12 @@ const insertParty = (kind, businessId, row) => {
     .run(id,businessId,name,text(row.person_name),text(row.urdu_title),text(row.phone_number),text(row.address),text(row.city),row.isActive === false ? 0 : 1,timestamp(row.createdAt),timestamp(row.updatedAt || row.createdAt));
 };
 
+const validSupplierId = (businessId, value) => {
+  const id = text(value);
+  if (!id) return null;
+  return db.prepare("SELECT id FROM suppliers WHERE business_id = ? AND id = ?").get(businessId, id)?.id || null;
+};
+
 const insertPurchase = (businessId, row) => {
   const id = text(row?._id);
   const purchaseNumber = text(row?.purchase_number);
@@ -22,8 +28,9 @@ const insertPurchase = (businessId, row) => {
   const articles = Array.isArray(row.articles) ? row.articles : [];
   const createdAt = timestamp(row.createdAt);
   const updatedAt = timestamp(row.updatedAt || row.createdAt);
+  const supplierId = validSupplierId(businessId, row.supplier_id);
   const result = db.prepare(`INSERT OR IGNORE INTO purchases (id,business_id,created_by,purchase_number,purchase_date,supplier_id,supplier_name,notes,total_amount,article_count,packet_count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-    .run(id,businessId,null,purchaseNumber,text(row.purchase_date) || createdAt.slice(0,10),text(row.supplier_id) || null,supplierName,text(row.notes),number(row.total_amount),articles.length,number(row.packet_count),createdAt,updatedAt);
+    .run(id,businessId,null,purchaseNumber,text(row.purchase_date) || createdAt.slice(0,10),supplierId,supplierName,text(row.notes),number(row.total_amount),articles.length,number(row.packet_count),createdAt,updatedAt);
   if (!result.changes) return;
   const insertItem = db.prepare(`INSERT OR IGNORE INTO purchase_items (purchase_id,position,article_no,qr_id,description,size,season,category,unit,quantity_dzn,quantity_pcs,quantity_pkt,rate,sale_rate,discount,discount_amount,amount) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
   articles.forEach((item,index) => {
