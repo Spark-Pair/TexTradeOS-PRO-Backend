@@ -10,6 +10,75 @@ export function ensureCommerceSchemaV2() {
   addColumn("invoices", "payment_status", "TEXT NOT NULL DEFAULT 'unpaid'");
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id TEXT PRIMARY KEY,
+      business_id INTEGER NOT NULL,
+      supplier_name TEXT NOT NULL,
+      person_name TEXT DEFAULT '',
+      urdu_title TEXT DEFAULT '',
+      phone_number TEXT DEFAULT '',
+      address TEXT DEFAULT '',
+      city TEXT DEFAULT '',
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS customers (
+      id TEXT PRIMARY KEY,
+      business_id INTEGER NOT NULL,
+      customer_name TEXT NOT NULL,
+      person_name TEXT DEFAULT '',
+      urdu_title TEXT DEFAULT '',
+      phone_number TEXT DEFAULT '',
+      address TEXT DEFAULT '',
+      city TEXT DEFAULT '',
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS purchases (
+      id TEXT PRIMARY KEY,
+      business_id INTEGER NOT NULL,
+      created_by INTEGER,
+      purchase_number TEXT NOT NULL,
+      purchase_date TEXT NOT NULL,
+      supplier_id TEXT,
+      supplier_name TEXT NOT NULL,
+      notes TEXT DEFAULT '',
+      total_amount REAL NOT NULL DEFAULT 0,
+      article_count INTEGER NOT NULL DEFAULT 0,
+      packet_count REAL NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(business_id, purchase_number),
+      FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+      FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL
+    );
+    CREATE TABLE IF NOT EXISTS purchase_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      purchase_id TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      article_no TEXT NOT NULL,
+      qr_id TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      size TEXT DEFAULT '',
+      season TEXT DEFAULT '',
+      category TEXT DEFAULT '',
+      unit REAL NOT NULL DEFAULT 0,
+      quantity_dzn REAL NOT NULL DEFAULT 0,
+      quantity_pcs REAL NOT NULL DEFAULT 0,
+      quantity_pkt REAL NOT NULL DEFAULT 0,
+      rate REAL NOT NULL DEFAULT 0,
+      sale_rate REAL NOT NULL DEFAULT 0,
+      discount TEXT DEFAULT '',
+      discount_amount REAL NOT NULL DEFAULT 0,
+      amount REAL NOT NULL DEFAULT 0,
+      FOREIGN KEY (purchase_id) REFERENCES purchases(id) ON DELETE CASCADE,
+      UNIQUE(purchase_id, article_no)
+    );
     CREATE TABLE IF NOT EXISTS returns (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       business_id INTEGER NOT NULL,
@@ -87,6 +156,11 @@ export function ensureCommerceSchemaV2() {
       created_at TEXT NOT NULL,
       FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE
     );
+    CREATE INDEX IF NOT EXISTS idx_suppliers_business_name ON suppliers(business_id, supplier_name);
+    CREATE INDEX IF NOT EXISTS idx_customers_business_name ON customers(business_id, customer_name);
+    CREATE INDEX IF NOT EXISTS idx_purchases_business_date ON purchases(business_id, purchase_date DESC);
+    CREATE INDEX IF NOT EXISTS idx_purchase_items_purchase ON purchase_items(purchase_id, position);
+    CREATE INDEX IF NOT EXISTS idx_purchase_items_article ON purchase_items(article_no);
     CREATE INDEX IF NOT EXISTS idx_returns_business_type_date ON returns(business_id, return_type, return_date DESC);
     CREATE INDEX IF NOT EXISTS idx_return_items_return ON return_items(return_id, position);
     CREATE INDEX IF NOT EXISTS idx_return_items_article ON return_items(article_no, purchase_number);
