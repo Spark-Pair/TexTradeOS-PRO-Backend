@@ -1,8 +1,11 @@
 import express from "express";
 import cors from "cors";
-import { ensureCommerceSchemaV2 } from "./db/schema-v2.js";
+import { initializeDatabase } from "./db/bootstrap.js";
+import { isAllowedCorsOrigin } from "./config/environment.js";
+import { requireAuth } from "./middleware/auth.middleware.js";
 import { requireLicense } from "./middleware/license.middleware.js";
 import { getPendingMandatoryUpdate } from "./updates.js";
+import { createCommerceRouter } from "./modules/commerce/commerce.routes.js";
 import setupRoutes from "./routes/setup.routes.js";
 import qrRoutes from "./routes/qr.routes.js";
 import authRoutes from "./routes/auth.routes.js";
@@ -15,27 +18,55 @@ import invoiceRoutes from "./routes/invoice.routes.js";
 import paymentRoutes from "./routes/payment.routes.js";
 import returnRoutes from "./routes/return.routes.js";
 
-ensureCommerceSchemaV2();
-const app=express();
-const allowedOrigins=String(process.env.CORS_ORIGIN||"http://localhost:5173").split(",").map(v=>v.trim()).filter(Boolean);
-app.use(cors({origin(origin,callback){if(!origin||allowedOrigins.includes(origin))return callback(null,true);return callback(new Error("Not allowed by CORS"));},credentials:true}));
-app.use(express.json({limit:"10mb"}));
-app.use(express.urlencoded({extended:true,limit:"10mb"}));
+initializeDatabase();
 
-app.use("/api",setupRoutes);
-app.use("/api",requireLicense);
-app.use("/api/qr",qrRoutes);
-app.use("/api/auth",authRoutes);
-app.use("/api/updates",updateRoutes);
-app.use("/api/system",systemRoutes);
-app.use("/api",(req,res,next)=>{const update=getPendingMandatoryUpdate();if(!update)return next();return res.status(503).json({code:"MANDATORY_UPDATE_REQUIRED",message:`TexTradeOS PRO ${update.version} must be installed before continuing.`,update});});
-app.use("/api/users",userRoutes);
-app.use("/api/businesses",businessRoutes);
-app.use("/api/dashboard",dashboardRoutes);
-app.use("/api/invoices",invoiceRoutes);
-app.use("/api/payments",paymentRoutes);
-app.use("/api/returns",returnRoutes);
+const app = express();
 
-app.use((req,res)=>res.status(404).json({message:`Route not found: ${req.method} ${req.path}`}));
-app.use((error,req,res,next)=>{console.error(error);res.status(500).json({message:"Server error"});});
+app.use(cors({
+  origin(origin, callback) {
+    if (isAllowedCorsOrigin(origin)) return callback(null, true);
+    return callback(new Error("Origin is not allowed"));
+  },
+  credentials: true,
+}));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+
+// Setup and health endpoints must remain available before license enforcement.
+app.use("/api", setupRoutes);
+app.use("/api", requireLicense);
+
+app.use("/api/qr", qrRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/updates", updateRoutes);
+app.use("/api/system", systemRoutes);
+
+// A mandatory update blocks business operations but not setup/system/update APIs.
+app.use("/api", (req, res, next) => {
+  const update = getPendingMandatoryUpdate();
+  if (!update) return next();
+  return res.status(503).json({
+    code: "MANDATORY_UPDATE_REQUIRED",
+    message: `TexTradeOS PRO ${update.version} must be installed before continuing.`,
+    update,
+  });
+});
+
+app.use("/api/users", userRoutes);
+app.use("/api/businesses", businessRoutes);
+app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/invoices", invoiceRoutes);
+app.use("/api/payments", paymentRoutes);
+app.use("/api/returns", returnRoutes);
+app.use("/api", createCommerceRouter(requireAuth));
+
+app.use((req, res) => {
+  res.status(404).json({ message: `Route not found: ${req.method} ${req.path}` });
+});
+
+app.use((error, req, res, next) => {
+  console.error(error);
+  res.status(error.status || 500).json({ message: error.message || "Server error" });
+});
+
 export default app;
