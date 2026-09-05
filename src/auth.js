@@ -1,9 +1,10 @@
 import jwt from "jsonwebtoken";
-import crypto from "node:crypto";
-import { db, toUserDto } from "./db.js";
 import { v4 as uuidv4 } from "uuid";
+import { toUserDto } from "./db.js";
+import { UserModel } from "./models/user.model.js";
 
 const isProduction = process.env.NODE_ENV === "production";
+
 const readSecret = (name, developmentFallback) => {
   const value = String(process.env[name] || "").trim();
   if (value) return value;
@@ -22,14 +23,6 @@ export const signRefreshToken = (user, sessionId) =>
 
 export const newSessionId = () => uuidv4();
 
-export const getUserById = (id) =>
-  db.prepare(`
-    SELECT users.*, businesses.name AS business_name
-    FROM users
-    LEFT JOIN businesses ON businesses.id = users.business_id
-    WHERE users.id = ?
-  `).get(id);
-
 export const requireAuth = (req, res, next) => {
   const header = req.headers.authorization || "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
@@ -37,23 +30,23 @@ export const requireAuth = (req, res, next) => {
 
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    const user = getUserById(payload.sub);
+    const user = UserModel.findById(payload.sub);
     if (!user || !user.is_active) return res.status(401).json({ message: "Invalid user" });
 
     req.user = user;
     req.userDto = toUserDto(user);
-    next();
+    return next();
   } catch {
-    res.status(401).json({ message: "Invalid token" });
+    return res.status(401).json({ message: "Invalid token" });
   }
 };
 
 export const requireDeveloper = (req, res, next) => {
   if (req.user?.role !== "developer") return res.status(403).json({ message: "Developer access required" });
-  next();
+  return next();
 };
 
 export const requireBusinessAdmin = (req, res, next) => {
   if (req.user?.role === "developer" || req.user?.role === "admin") return next();
-  res.status(403).json({ message: "Admin access required" });
+  return res.status(403).json({ message: "Admin access required" });
 };
