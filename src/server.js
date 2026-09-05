@@ -11,10 +11,13 @@ import { requireLicense, validateLicense } from "./license.js";
 import { checkForUpdate, getPendingMandatoryUpdate, requestUpdate } from "./updates.js";
 import {
   listBackups,
+  getBackupPath,
   readFingerprint,
   readLauncherLog,
   readLauncherResult,
   submitLauncherCommand,
+  submitSystemCommand,
+  stageRestoreUpload,
 } from "./management.js";
 import { asyncHandler, normalizeStringList, now, paginate } from "./utils.js";
 import { ensureCommerceSchemaV2 } from "./db/schema-v2.js";
@@ -299,6 +302,20 @@ app.get("/api/system/diagnostics", requireAuth, requireBusinessAdmin, (req, res)
   res.json(diagnostics);
 });
 
+app.get("/api/system/backups/:name/download", requireAuth, requireBusinessAdmin, (req, res) => {
+  const filePath = getBackupPath(req.params.name);
+  if (!filePath) return res.status(404).json({ message: "Backup not found" });
+  res.download(filePath, req.params.name);
+});
+
+app.post("/api/system/restore-upload", requireAuth, requireBusinessAdmin, asyncHandler(async (req, res) => {
+  if (req.is("application/octet-stream") === false) {
+    return res.status(415).json({ message: "Select a SQLite backup file" });
+  }
+  const upload = await stageRestoreUpload(req, req.get("x-file-name"));
+  res.status(202).json(submitSystemCommand("restore-upload", upload));
+}));
+
 app.post("/api/system/commands", requireAuth, requireBusinessAdmin, (req, res) => {
   const type = String(req.body?.type || "");
   const allowed = new Set(["backup", "restore", "firewall"]);
@@ -307,7 +324,7 @@ app.post("/api/system/commands", requireAuth, requireBusinessAdmin, (req, res) =
     return res.status(400).json({ message: "Select a valid backup" });
   }
   const payload = type === "restore" ? { backup: req.body.backup } : {};
-  res.status(202).json(submitLauncherCommand(type, payload));
+  res.status(202).json(submitSystemCommand(type, payload));
 });
 
 app.get("/api/system/commands/:id", requireAuth, requireBusinessAdmin, (req, res) => {
