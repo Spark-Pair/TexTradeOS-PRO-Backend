@@ -26,7 +26,7 @@ export const SystemController = {
         return res.status(415).json({ message: "Select a SQLite backup file" });
       }
       const upload = await SystemService.stageRestore(req, req.get("x-file-name"));
-      res.status(202).json(SystemService.submitCommand("restore-upload", upload));
+      res.status(202).json(SystemService.submitRestoreUpload(upload));
     } catch (error) {
       next(error);
     }
