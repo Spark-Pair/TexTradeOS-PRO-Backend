@@ -11,6 +11,8 @@ export const getPurchaseDto = (businessId, id) => dto(getPurchase(businessId, id
 
 export const savePurchase = (businessId, userId, payload = {}, id = "") => {
   const existing = id ? getPurchase(businessId, id) : null;
+  if (id && !existing) throw Object.assign(new Error("Purchase not found"), { statusCode: 404 });
+
   const supplierName = text(payload.supplier_name);
   const articles = Array.isArray(payload.articles) ? payload.articles : [];
   if (!supplierName) throw Object.assign(new Error("Supplier is required"), { statusCode: 400 });
@@ -21,7 +23,7 @@ export const savePurchase = (businessId, userId, payload = {}, id = "") => {
   let articleSequence = highestArticleSequence(businessId);
   const normalizedItems = articles.map((item) => ({ ...item, article_no: text(item.article_no) && !text(item.article_no).includes("PREVIEW") ? text(item.article_no) : `ART-${String(++articleSequence).padStart(5, "0")}`, qr_id: text(item.qr_id) || crypto.randomUUID(), description: text(item.description), size: text(item.size), season: text(item.season), category: text(item.category), unit: number(item.unit), quantity_dzn: number(item.quantity_dzn), quantity_pcs: number(item.quantity_pcs ?? item.total_pcs), quantity_pkt: number(item.quantity_pkt), rate: number(item.rate), sale_rate: number(item.sale_rate), discount: text(item.discount), discount_amount: number(item.discount_amount), amount: number(item.amount) }));
   const timestamp = new Date().toISOString();
-  const row = savePurchaseRecord(businessId, userId, { id: existing?.id || id || crypto.randomUUID(), purchase_number: purchaseNumber, purchase_date: purchaseDate, supplier_id: text(payload.supplier_id) || null, supplier_name: supplierName, notes: text(payload.notes), total_amount: normalizedItems.reduce((sum,item) => sum + item.amount, 0), packet_count: normalizedItems.reduce((sum,item) => sum + item.quantity_pkt, 0), created_at: existing?.created_at || timestamp, updated_at: timestamp }, normalizedItems);
+  const row = savePurchaseRecord(businessId, userId, { id: existing?.id || crypto.randomUUID(), purchase_number: purchaseNumber, purchase_date: purchaseDate, supplier_id: text(payload.supplier_id) || null, supplier_name: supplierName, notes: text(payload.notes), total_amount: normalizedItems.reduce((sum,item) => sum + item.amount, 0), packet_count: normalizedItems.reduce((sum,item) => sum + item.quantity_pkt, 0), created_at: existing?.created_at || timestamp, updated_at: timestamp }, normalizedItems);
   return dto(row);
 };
 
