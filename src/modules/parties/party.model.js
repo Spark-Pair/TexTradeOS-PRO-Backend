@@ -1,4 +1,4 @@
-import { db } from "../../db.js";
+import { db } from "../../db/connection.js";
 
 const config = {
   customers: { table: "customers", name: "customer_name" },
