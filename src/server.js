@@ -17,6 +17,13 @@ import {
   submitLauncherCommand,
 } from "./management.js";
 import { asyncHandler, normalizeStringList, now, paginate } from "./utils.js";
+import { ensureCommerceSchemaV2 } from "./db/schema-v2.js";
+import { createReturnRouter } from "./modules/returns/return.routes.js";
+import { createPaymentRouter } from "./modules/payments/payment.routes.js";
+import { createReturn } from "./modules/returns/return.service.js";
+import { addInvoicePayment } from "./modules/payments/payment.service.js";
+
+ensureCommerceSchemaV2();
 
 const app = express();
 const PORT = Number(process.env.PORT || 4000);
@@ -517,6 +524,9 @@ app.get("/api/dashboard/trend", requireAuth, (req, res) => {
   res.json({ success: true, data: { from: dateFrom, to: dateTo, trend } });
 });
 
+app.use("/api/returns", createReturnRouter(requireAuth));
+app.use("/api/payments", createPaymentRouter(requireAuth));
+
 app.get("/api/invoices", requireAuth, (req, res) => {
   const conditions = ["invoices.business_id = ?"];
   const params = [req.user.business_id];
@@ -609,8 +619,8 @@ app.post("/api/invoices", requireAuth, (req, res) => {
         customer_urdu_title, salesman_name, customer_phone, customer_address, gross_amount,
         percent_discount_amount, rupee_discount_amount, total_discount_amount,
         net_amount, sales_return_amount, received_amount, balance_amount,
-        return_amount, total_amount, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        return_amount, total_amount, customer_id, customer_kind, walk_in_person, payment_status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       req.user.business_id,
       req.user.id,
@@ -631,6 +641,10 @@ app.post("/api/invoices", requireAuth, (req, res) => {
       totals.balance_amount,
       totals.return_amount,
       totals.total_amount,
+      String(req.body?.customer_id || "").trim() || null,
+      req.body?.customer_kind === "walk_in" ? "walk_in" : "registered",
+      String(req.body?.walk_in_person || "").trim(),
+      "unpaid",
       timestamp,
       timestamp
     );
@@ -663,6 +677,28 @@ app.post("/api/invoices", requireAuth, (req, res) => {
         article.amount
       );
     });
+    const linkedSalesReturn = req.body?.sales_return;
+    if (linkedSalesReturn && Array.isArray(linkedSalesReturn.articles) && linkedSalesReturn.articles.length) {
+      const returnRecord = createReturn({
+        businessId: req.user.business_id,
+        userId: req.user.id,
+        type: "sales",
+        body: {
+          ...linkedSalesReturn,
+          return_date: linkedSalesReturn.return_date || invoiceDate,
+          party_id: String(req.body?.customer_id || "").trim(),
+          party_name: customerName,
+          linked_invoice_id: Number(result.lastInsertRowid),
+        },
+      });
+      db.prepare("UPDATE invoices SET sales_return_amount = ? WHERE id = ?").run(returnRecord.total_amount, result.lastInsertRowid);
+    }
+
+    const immediatePayment = req.body?.payment;
+    if (immediatePayment && Number(immediatePayment.amount || 0) > 0) {
+      addInvoicePayment({ businessId: req.user.business_id, userId: req.user.id, invoiceId: Number(result.lastInsertRowid), payment: immediatePayment });
+    }
+
     db.prepare("UPDATE businesses SET invoice_counter_year = ?, invoice_counter_last = ?, updated_at = ? WHERE id = ?")
       .run(year, nextNo, timestamp, req.user.business_id);
 
