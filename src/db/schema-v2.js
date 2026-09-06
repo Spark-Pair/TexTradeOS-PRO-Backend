@@ -32,5 +32,10 @@ export function ensureCommerceSchemaV2() {
     CREATE INDEX IF NOT EXISTS idx_inventory_movements_article ON inventory_movements(business_id, article_no, purchase_number);
   `);
 
+  addColumn("returns", "adjustment_input", "TEXT NOT NULL DEFAULT ''");
+  addColumn("return_items", "discount", "TEXT NOT NULL DEFAULT ''");
+  addColumn("return_items", "discount_type", "TEXT NOT NULL DEFAULT ''");
+  addColumn("return_items", "discount_amount", "REAL NOT NULL DEFAULT 0");
+
   migrateSharedCommerceData();
 }
