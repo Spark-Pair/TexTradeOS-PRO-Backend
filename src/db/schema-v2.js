@@ -1,4 +1,4 @@
-import { db } from "../db.js";
+import { db } from "./connection.js";
 import { migrateSharedCommerceData } from "./migrate-shared-commerce.js";
 
 const hasColumn = (table, column) => db.prepare(`PRAGMA table_info(${table})`).all().some((row) => row.name === column);
