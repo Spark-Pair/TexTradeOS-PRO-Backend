@@ -1,4 +1,4 @@
-import { toInvoiceDto } from "../db.js";
+import { toInvoiceDto } from "../db/mappers.js";
 import { now, paginate } from "../utils.js";
 import { InvoiceModel } from "../models/invoice.model.js";
 import { ReturnModel } from "../modules/returns/return.model.js";
