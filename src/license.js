@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import PUBLIC_KEY from "./config/licensePublicKey.js";
-import { IS_DEVELOPMENT } from "./environment.js";
+import { env } from "./config/environment.js";
 
 const licensePath = path.resolve(process.env.LICENSE_PATH || "./license/license.json");
 const fingerprintPath = path.resolve(process.env.FINGERPRINT_PATH || "./license/fingerprint.json");
@@ -28,7 +28,7 @@ const readJson = (filePath) =>
   JSON.parse(fs.readFileSync(filePath, "utf8").replace(/^\uFEFF/, ""));
 
 export const validateLicense = () => {
-  if (IS_DEVELOPMENT) {
+  if (env.isDevelopment) {
     return {
       allowed: true,
       code: "LICENSE_DEVELOPMENT",
