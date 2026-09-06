@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { newSessionId, signAccessToken, signRefreshToken, verifyRefreshToken } from "../auth.js";
-import { toUserDto } from "../db.js";
+import { toUserDto } from "../db/mappers.js";
 import { now } from "../utils.js";
 import { UserModel } from "../models/user.model.js";
 import { SessionModel } from "../models/session.model.js";
