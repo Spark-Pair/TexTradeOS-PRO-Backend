@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { getParty } from "../parties/party.model.js";
-import { getPurchase, getPurchaseItems, listPurchases, removePurchase, savePurchaseRecord } from "./purchase.model.js";
+import { getArticleUsage, getPurchase, getPurchaseItems, listPurchases, removePurchase, savePurchaseRecord } from "./purchase.model.js";
 
 const text = (value) => String(value || "").trim();
 const number = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
@@ -9,11 +9,11 @@ const dto = (row) => row ? ({ _id: row.id, purchase_number: row.purchase_number,
 
 export const listPurchaseDtos = (businessId) => listPurchases(businessId).map(dto);
 export const getPurchaseDto = (businessId, id) => dto(getPurchase(businessId, id));
+export const getPurchaseArticleUsage = (businessId, articleNo, purchaseNumber) => getArticleUsage(businessId, articleNo, purchaseNumber);
 
 export const savePurchase = (businessId, userId, payload = {}, id = "") => {
   const existing = id ? getPurchase(businessId, id) : null;
   if (id && !existing) throw Object.assign(new Error("Purchase not found"), { statusCode: 404 });
-
   const supplierId = text(payload.supplier_id);
   const supplier = supplierId ? getParty("suppliers", businessId, supplierId) : null;
   if (supplierId && !supplier) throw Object.assign(new Error("Supplier not found for this business"), { statusCode: 404 });
@@ -21,20 +21,12 @@ export const savePurchase = (businessId, userId, payload = {}, id = "") => {
   const articles = Array.isArray(payload.articles) ? payload.articles : [];
   if (!supplierName) throw Object.assign(new Error("Supplier is required"), { statusCode: 400 });
   if (!articles.length) throw Object.assign(new Error("At least one article is required"), { statusCode: 400 });
-
   const purchaseDate = text(payload.purchase_date) || new Date().toISOString().slice(0, 10);
   const year = new Date(`${purchaseDate}T00:00:00`).getFullYear();
   if (!Number.isFinite(year)) throw Object.assign(new Error("Invalid purchase date"), { statusCode: 400 });
-
-  const normalizedItems = articles.map((item) => {
-    const suppliedArticle = text(item.article_no);
-    return { ...item, article_no: suppliedArticle && !suppliedArticle.includes("PREVIEW") ? suppliedArticle : "", qr_id: text(item.qr_id) || crypto.randomUUID(), description: text(item.description), size: text(item.size), season: text(item.season), category: text(item.category), unit: number(item.unit), quantity_dzn: number(item.quantity_dzn), quantity_pcs: number(item.quantity_pcs ?? item.total_pcs), quantity_pkt: number(item.quantity_pkt), rate: number(item.rate), sale_rate: number(item.sale_rate), discount: text(item.discount), discount_amount: number(item.discount_amount), amount: number(item.amount) };
-  });
-  const timestamp = new Date().toISOString();
-  const row = savePurchaseRecord(businessId, userId, { id: existing?.id || crypto.randomUUID(), purchase_number: existing?.purchase_number || "", purchase_date: purchaseDate, supplier_id: supplierId || null, supplier_name: supplierName, notes: text(payload.notes), total_amount: normalizedItems.reduce((sum,item) => sum + item.amount, 0), packet_count: normalizedItems.reduce((sum,item) => sum + item.quantity_pkt, 0), created_at: existing?.created_at || timestamp, updated_at: timestamp }, normalizedItems, { allocateNumbers: !existing, year });
+  const normalizedItems = articles.map((item) => { const suppliedArticle=text(item.article_no); return { ...item, article_no:suppliedArticle&&!suppliedArticle.includes("PREVIEW")?suppliedArticle:"", qr_id:text(item.qr_id)||crypto.randomUUID(), description:text(item.description), size:text(item.size), season:text(item.season), category:text(item.category), unit:number(item.unit), quantity_dzn:number(item.quantity_dzn), quantity_pcs:number(item.quantity_pcs??item.total_pcs), quantity_pkt:number(item.quantity_pkt), rate:number(item.rate), sale_rate:number(item.sale_rate), discount:text(item.discount), discount_amount:number(item.discount_amount), amount:number(item.amount) }; });
+  const timestamp=new Date().toISOString();
+  const row=savePurchaseRecord(businessId,userId,{ id:existing?.id||crypto.randomUUID(), purchase_number:existing?.purchase_number||"", purchase_date:purchaseDate, supplier_id:supplierId||null, supplier_name:supplierName, notes:text(payload.notes), total_amount:normalizedItems.reduce((sum,item)=>sum+item.amount,0), packet_count:normalizedItems.reduce((sum,item)=>sum+item.quantity_pkt,0), created_at:existing?.created_at||timestamp, updated_at:timestamp },normalizedItems,{allocateNumbers:!existing,year});
   return dto(row);
 };
-
-export const deletePurchase = (businessId, id) => {
-  if (!removePurchase(businessId, id)) throw Object.assign(new Error("Purchase not found"), { statusCode: 404 });
-};
+export const deletePurchase = (businessId, id) => { if (!removePurchase(businessId,id)) throw Object.assign(new Error("Purchase not found"),{statusCode:404}); };
