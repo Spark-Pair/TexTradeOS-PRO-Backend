@@ -4,13 +4,16 @@ const number = (value) => Number(value || 0);
 
 export function getInventory(businessId) {
   return listInventory(businessId).map((row) => {
+    const grossPurchasedPcs = number(row.purchased_pcs);
+    const grossSoldPcs = number(row.sold_pcs);
+    const salesReturnPcs = number(row.sales_return_pcs);
+    const purchaseReturnPcs = number(row.purchase_return_pcs);
+    const adjustmentPcs = number(row.adjustment_pcs);
+    const netPurchasedPcs = Math.max(0, grossPurchasedPcs - purchaseReturnPcs);
+    const netSoldPcs = Math.max(0, grossSoldPcs - salesReturnPcs);
     const stockPcs = Math.max(
       0,
-      number(row.purchased_pcs)
-        - number(row.sold_pcs)
-        + number(row.sales_return_pcs)
-        - number(row.purchase_return_pcs)
-        + number(row.adjustment_pcs)
+      grossPurchasedPcs - grossSoldPcs + salesReturnPcs - purchaseReturnPcs + adjustmentPcs
     );
     const unit = number(row.unit);
 
@@ -29,11 +32,13 @@ export function getInventory(businessId) {
       purchase_date: row.purchase_date,
       supplier_id: row.supplier_id || "",
       supplier_name: row.supplier_name || "",
-      purchased_pcs: number(row.purchased_pcs),
-      sold_pcs: number(row.sold_pcs),
-      sales_return_pcs: number(row.sales_return_pcs),
-      purchase_return_pcs: number(row.purchase_return_pcs),
-      adjustment_pcs: number(row.adjustment_pcs),
+      purchased_pcs: netPurchasedPcs,
+      sold_pcs: netSoldPcs,
+      gross_purchased_pcs: grossPurchasedPcs,
+      gross_sold_pcs: grossSoldPcs,
+      sales_return_pcs: salesReturnPcs,
+      purchase_return_pcs: purchaseReturnPcs,
+      adjustment_pcs: adjustmentPcs,
       stock_pcs: stockPcs,
       stock_dzn: stockPcs / 12,
       stock_pkt: unit > 0 ? stockPcs / unit : 0,
@@ -74,7 +79,7 @@ export function getInventoryMovements(businessId, articleNo, purchaseNumber) {
     date: row.date,
     reference: row.reference,
     party: row.party || "",
-    pcs: number(row.pcs),
+    pcs: row.return_type === "sales" ? number(row.pcs) : -number(row.pcs),
     rate: number(row.rate),
     stock_action: row.stock_action,
   }));
