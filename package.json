@@ -9,7 +9,8 @@
     "start:production": "node dist/server.cjs",
     "build": "node scripts/build.mjs",
     "test": "node --test",
-    "license:create": "node scripts/createLicense.mjs"
+    "license:create": "node scripts/createLicense.mjs",
+    "demo:print-stress-db": "node scripts/createPrintStressTestDb.mjs"
   },
   "keywords": [],
   "author": "",
