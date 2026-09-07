@@ -11,6 +11,44 @@ const partyConfig = (kind) => {
   return value;
 };
 
+const num = (value) => Number(value || 0);
+
+const customerBalance = (businessId, id) => {
+  const invoices = num(db.prepare("SELECT COALESCE(SUM(net_amount),0) amount FROM invoices WHERE business_id=? AND customer_id=?").get(businessId, String(id))?.amount);
+  const payments = num(db.prepare("SELECT COALESCE(SUM(ip.amount),0) amount FROM invoice_payments ip JOIN invoices i ON i.id=ip.invoice_id WHERE ip.business_id=? AND i.customer_id=?").get(businessId, String(id))?.amount);
+  const returns = num(db.prepare("SELECT COALESCE(SUM(total_amount),0) amount FROM returns WHERE business_id=? AND return_type='sales' AND party_id=?").get(businessId, String(id))?.amount);
+  return { charges: invoices, credits: payments + returns, balance: invoices - payments - returns };
+};
+
+const supplierBalance = (businessId, id) => {
+  const purchases = num(db.prepare("SELECT COALESCE(SUM(total_amount),0) amount FROM purchases WHERE business_id=? AND supplier_id=?").get(businessId, String(id))?.amount);
+  const returns = num(db.prepare("SELECT COALESCE(SUM(total_amount),0) amount FROM returns WHERE business_id=? AND return_type='purchase' AND party_id=?").get(businessId, String(id))?.amount);
+  return { charges: purchases, credits: returns, balance: purchases - returns };
+};
+
+export const getPartyBalance = (kind, businessId, id) => kind === "customers" ? customerBalance(businessId, id) : supplierBalance(businessId, id);
+
+export const getPartyLedger = (kind, businessId, id) => {
+  const party = getParty(kind, businessId, id);
+  if (!party) return null;
+  let rows = [];
+  if (kind === "customers") {
+    const invoices = db.prepare("SELECT id,invoice_date date,invoice_number reference,net_amount amount FROM invoices WHERE business_id=? AND customer_id=?").all(businessId, String(id)).map((r) => ({ ...r, type: "invoice", description: "Sales Invoice", debit: num(r.amount), credit: 0 }));
+    const payments = db.prepare(`SELECT ip.id,ip.payment_date date,i.invoice_number reference,ip.amount,ip.method,ip.reference_no FROM invoice_payments ip JOIN invoices i ON i.id=ip.invoice_id WHERE ip.business_id=? AND i.customer_id=?`).all(businessId, String(id)).map((r) => ({ ...r, type: "payment", description: `Payment Received${r.method ? ` · ${r.method}` : ""}`, debit: 0, credit: num(r.amount) }));
+    const returns = db.prepare("SELECT id,return_date date,return_number reference,total_amount amount,total_pcs,notes FROM returns WHERE business_id=? AND return_type='sales' AND party_id=?").all(businessId, String(id)).map((r) => ({ ...r, type: "sales_return", description: "Sales Return", debit: 0, credit: num(r.amount) }));
+    rows = [...invoices, ...payments, ...returns];
+  } else {
+    const purchases = db.prepare("SELECT id,purchase_date date,purchase_number reference,total_amount amount,article_count,packet_count,notes FROM purchases WHERE business_id=? AND supplier_id=?").all(businessId, String(id)).map((r) => ({ ...r, type: "purchase", description: "Purchase", debit: num(r.amount), credit: 0 }));
+    const returns = db.prepare("SELECT id,return_date date,return_number reference,total_amount amount,total_pcs,stock_action,notes FROM returns WHERE business_id=? AND return_type='purchase' AND party_id=?").all(businessId, String(id)).map((r) => ({ ...r, type: "purchase_return", description: r.stock_action === "keep_goods" ? "Supplier Allowance / Keep Goods" : "Purchase Return", debit: 0, credit: num(r.amount) }));
+    rows = [...purchases, ...returns];
+  }
+  rows.sort((a, b) => String(a.date).localeCompare(String(b.date)) || num(a.id) - num(b.id));
+  let running = 0;
+  rows = rows.map((row) => { running += num(row.debit) - num(row.credit); return { ...row, running_balance: running }; });
+  const totals = rows.reduce((acc, row) => ({ debit: acc.debit + num(row.debit), credit: acc.credit + num(row.credit) }), { debit: 0, credit: 0 });
+  return { rows, totals: { ...totals, balance: totals.debit - totals.credit } };
+};
+
 export const listParties = (kind, businessId) => {
   const { table } = partyConfig(kind);
   return db.prepare(`SELECT * FROM ${table} WHERE business_id = ? ORDER BY created_at DESC`).all(businessId);
