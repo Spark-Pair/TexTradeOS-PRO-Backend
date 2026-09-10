@@ -16,14 +16,16 @@ const num = (value) => Number(value || 0);
 const customerBalance = (businessId, id) => {
   const invoices = num(db.prepare("SELECT COALESCE(SUM(net_amount),0) amount FROM invoices WHERE business_id=? AND customer_id=?").get(businessId, String(id))?.amount);
   const payments = num(db.prepare("SELECT COALESCE(SUM(ip.amount),0) amount FROM invoice_payments ip JOIN invoices i ON i.id=ip.invoice_id WHERE ip.business_id=? AND i.customer_id=?").get(businessId, String(id))?.amount);
+  const directPayments = num(db.prepare("SELECT COALESCE(SUM(amount),0) amount FROM party_payments WHERE business_id=? AND party_type='customer' AND party_id=?").get(businessId, String(id))?.amount);
   const returns = num(db.prepare("SELECT COALESCE(SUM(total_amount),0) amount FROM returns WHERE business_id=? AND return_type='sales' AND party_id=?").get(businessId, String(id))?.amount);
-  return { charges: invoices, credits: payments + returns, balance: invoices - payments - returns };
+  return { charges: invoices, credits: payments + directPayments + returns, balance: invoices - payments - directPayments - returns };
 };
 
 const supplierBalance = (businessId, id) => {
   const purchases = num(db.prepare("SELECT COALESCE(SUM(total_amount),0) amount FROM purchases WHERE business_id=? AND supplier_id=?").get(businessId, String(id))?.amount);
   const returns = num(db.prepare("SELECT COALESCE(SUM(total_amount),0) amount FROM returns WHERE business_id=? AND return_type='purchase' AND party_id=?").get(businessId, String(id))?.amount);
-  return { charges: purchases, credits: returns, balance: purchases - returns };
+  const payments = num(db.prepare("SELECT COALESCE(SUM(amount),0) amount FROM party_payments WHERE business_id=? AND party_type='supplier' AND party_id=?").get(businessId, String(id))?.amount);
+  return { charges: purchases, credits: returns + payments, balance: purchases - returns - payments };
 };
 
 export const getPartyBalance = (kind, businessId, id) => kind === "customers" ? customerBalance(businessId, id) : supplierBalance(businessId, id);
@@ -32,12 +34,14 @@ const allLedgerRows = (kind, businessId, id) => {
   if (kind === "customers") {
     const invoices = db.prepare("SELECT id,invoice_date date,invoice_number reference,net_amount amount FROM invoices WHERE business_id=? AND customer_id=?").all(businessId, String(id)).map((r) => ({ ...r, type: "invoice", description: "Sales Invoice", debit: num(r.amount), credit: 0 }));
     const payments = db.prepare(`SELECT ip.id,ip.payment_date date,i.invoice_number reference,ip.amount,ip.method,ip.reference_no,ip.notes FROM invoice_payments ip JOIN invoices i ON i.id=ip.invoice_id WHERE ip.business_id=? AND i.customer_id=?`).all(businessId, String(id)).map((r) => ({ ...r, type: "payment", description: `Payment Received${r.method ? ` · ${r.method}` : ""}`, debit: 0, credit: num(r.amount) }));
+    const directPayments = db.prepare("SELECT id,payment_date date,reference_no reference,amount,method,reference_no,bank_name,cheque_date,slip_date,notes FROM party_payments WHERE business_id=? AND party_type='customer' AND party_id=?").all(businessId, String(id)).map((r) => ({ ...r, type: "customer_payment", description: `Payment Received${r.method ? ` - ${r.method}` : ""}`, debit: 0, credit: num(r.amount) }));
     const returns = db.prepare("SELECT id,return_date date,return_number reference,total_amount amount,total_pcs,notes FROM returns WHERE business_id=? AND return_type='sales' AND party_id=?").all(businessId, String(id)).map((r) => ({ ...r, type: "sales_return", description: "Sales Return", debit: 0, credit: num(r.amount) }));
-    return [...invoices, ...payments, ...returns];
+    return [...invoices, ...payments, ...directPayments, ...returns];
   }
   const purchases = db.prepare("SELECT id,purchase_date date,purchase_number reference,total_amount amount,article_count,packet_count,notes FROM purchases WHERE business_id=? AND supplier_id=?").all(businessId, String(id)).map((r) => ({ ...r, type: "purchase", description: "Purchase", debit: num(r.amount), credit: 0 }));
   const returns = db.prepare("SELECT id,return_date date,return_number reference,total_amount amount,total_pcs,stock_action,notes FROM returns WHERE business_id=? AND return_type='purchase' AND party_id=?").all(businessId, String(id)).map((r) => ({ ...r, type: "purchase_return", description: r.stock_action === "keep_goods" ? "Supplier Allowance / Keep Goods" : "Purchase Return", debit: 0, credit: num(r.amount) }));
-  return [...purchases, ...returns];
+  const payments = db.prepare("SELECT id,payment_date date,reference_no reference,amount,method,reference_no,bank_name,cheque_date,slip_date,notes FROM party_payments WHERE business_id=? AND party_type='supplier' AND party_id=?").all(businessId, String(id)).map((r) => ({ ...r, type: "supplier_payment", description: `Payment Paid${r.method ? ` - ${r.method}` : ""}`, debit: 0, credit: num(r.amount) }));
+  return [...purchases, ...returns, ...payments];
 };
 
 export const getPartyLedger = (kind, businessId, id, filters = {}) => {
@@ -82,4 +86,21 @@ export const setPartyStatus = (kind, businessId, id, isActive, updatedAt) => {
   const { table } = partyConfig(kind);
   db.prepare(`UPDATE ${table} SET is_active = ?, updated_at = ? WHERE business_id = ? AND id = ?`).run(isActive ? 1 : 0, updatedAt, businessId, id);
   return getParty(kind, businessId, id);
+};
+
+export const insertPartyPayment = (values) => db.prepare(`INSERT INTO party_payments (business_id,party_type,party_id,created_by,payment_date,method,amount,reference_no,bank_name,cheque_date,slip_date,notes,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...values);
+export const getPartyPayment = (businessId, id) => db.prepare("SELECT * FROM party_payments WHERE business_id=? AND id=?").get(businessId, id);
+
+export const listPayments = (businessId, filters = {}) => {
+  const partyType = String(filters.party_type || "").trim();
+  const method = String(filters.method || "").trim();
+  const dateFrom = String(filters.date_from || "").slice(0, 10);
+  const dateTo = String(filters.date_to || "").slice(0, 10);
+  const rows = [
+    ...db.prepare(`SELECT pp.id,pp.payment_date,pp.method,pp.amount,pp.reference_no,pp.bank_name,pp.cheque_date,pp.slip_date,pp.notes,pp.party_type,pp.party_id,CASE WHEN pp.party_type='customer' THEN c.customer_name ELSE s.supplier_name END party_name,'party' source FROM party_payments pp LEFT JOIN customers c ON c.business_id=pp.business_id AND c.id=pp.party_id AND pp.party_type='customer' LEFT JOIN suppliers s ON s.business_id=pp.business_id AND s.id=pp.party_id AND pp.party_type='supplier' WHERE pp.business_id=?`).all(businessId),
+    ...db.prepare(`SELECT ip.id,ip.payment_date,ip.method,ip.amount,ip.reference_no,ip.bank_name,ip.cheque_date,'' slip_date,ip.notes,'customer' party_type,i.customer_id party_id,i.customer_name party_name,'invoice' source FROM invoice_payments ip JOIN invoices i ON i.id=ip.invoice_id WHERE ip.business_id=?`).all(businessId),
+  ];
+  return rows
+    .filter((row) => (!partyType || row.party_type === partyType) && (!method || row.method === method) && (!dateFrom || String(row.payment_date).slice(0, 10) >= dateFrom) && (!dateTo || String(row.payment_date).slice(0, 10) <= dateTo))
+    .sort((a, b) => String(b.payment_date).localeCompare(String(a.payment_date)) || num(b.id) - num(a.id));
 };
