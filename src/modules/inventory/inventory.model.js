@@ -13,8 +13,29 @@ export function listInventory(businessId) {
       COALESCE((SELECT SUM(ri.pcs) FROM return_items ri JOIN returns r ON r.id = ri.return_id WHERE r.business_id = p.business_id AND r.return_type = 'purchase' AND r.stock_action = 'return_stock' AND ri.article_no = pi.article_no AND (ri.purchase_number = p.purchase_number OR COALESCE(ri.purchase_number, '') = '')), 0) AS purchase_return_pcs,
       COALESCE((SELECT SUM(im.pcs) FROM inventory_movements im WHERE im.business_id = p.business_id AND im.article_no = pi.article_no AND (im.purchase_number = p.purchase_number OR COALESCE(im.purchase_number, '') = '') AND ${nonReturnAdjustment}), 0) AS adjustment_pcs
     FROM purchase_items pi JOIN purchases p ON p.id = pi.purchase_id
-    WHERE p.business_id = ? ORDER BY p.purchase_date DESC, p.purchase_number DESC, pi.position ASC
-  `).all(businessId);
+    WHERE p.business_id = ?
+
+    UNION ALL
+
+    SELECT ii.article_no, '' AS qr_id,
+      COALESCE(MAX(ii.description), '') AS description,
+      COALESCE(MAX(ii.size), '') AS size,
+      '' AS season, '' AS category, COALESCE(MAX(ii.unit), 0) AS unit,
+      COALESCE(MAX(ii.purchase_rate), 0) AS purchase_rate,
+      COALESCE(MAX(ii.rate), 0) AS sale_rate,
+      NULL AS purchase_id, '' AS purchase_number, MAX(i.invoice_date) AS purchase_date,
+      '' AS supplier_id, 'Direct sale' AS supplier_name,
+      COALESCE(SUM(ii.pcs), 0) AS purchased_pcs,
+      COALESCE(SUM(ii.pcs), 0) AS sold_pcs,
+      COALESCE((SELECT SUM(ri.pcs) FROM return_items ri JOIN returns r ON r.id = ri.return_id WHERE r.business_id = i.business_id AND r.return_type = 'sales' AND r.stock_action = 'return_stock' AND ri.article_no = ii.article_no AND COALESCE(ri.purchase_number, '') = ''), 0) AS sales_return_pcs,
+      0 AS purchase_return_pcs,
+      COALESCE((SELECT SUM(im.pcs) FROM inventory_movements im WHERE im.business_id = i.business_id AND im.article_no = ii.article_no AND COALESCE(im.purchase_number, '') = '' AND ${nonReturnAdjustment}), 0) AS adjustment_pcs
+    FROM invoice_items ii JOIN invoices i ON i.id = ii.invoice_id
+    WHERE i.business_id = ? AND COALESCE(ii.purchase_number, '') = '' AND TRIM(ii.article_no) <> ''
+    GROUP BY i.business_id, ii.article_no
+
+    ORDER BY purchase_date DESC, purchase_number DESC
+  `).all(businessId, businessId);
 }
 
 export function listInventoryMovements(businessId, articleNo, purchaseNumber) {

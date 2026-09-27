@@ -14,7 +14,6 @@ export const InventoryController = {
       const articleNo = String(req.params.articleNo || "").trim();
       const purchaseNumber = String(req.query.purchase_number || "").trim();
       if (!articleNo) return res.status(400).json({ message: "article number is required" });
-      if (!purchaseNumber) return res.status(400).json({ message: "purchase_number is required" });
       return res.json({ success: true, data: getInventoryMovements(req.user.business_id, articleNo, purchaseNumber) });
     });
   },
