@@ -7,6 +7,7 @@ const parseOrigins = (value) => String(value || "http://localhost:5173")
 
 export const env = Object.freeze({
   port: Number(process.env.PORT || 4000),
+  host: process.env.HOST || "0.0.0.0",
   appVersion: process.env.APP_VERSION || "0.0.0",
   isDevelopment: parseBoolean(process.env.IS_DEVELOPMENT),
   corsOrigins: parseOrigins(process.env.CORS_ORIGIN),

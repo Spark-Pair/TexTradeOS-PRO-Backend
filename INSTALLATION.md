@@ -40,7 +40,8 @@ computer that will act as the TexTradeOS server.
 9. Continue to login. An administrator can configure the firewall under
    **Settings > System Management**.
 
-The launcher shows a startup splash, starts Docker Desktop when necessary,
+The launcher shows a startup splash, creates/updates a self-signed certificate
+for the current LAN IP, starts Docker Desktop when necessary,
 creates `C:\ProgramData\TexTradeOS`, starts both containers, waits for health
 checks, opens TexTradeOS in the default browser, and then remains hidden as the
 restricted Windows management agent.
@@ -50,12 +51,16 @@ restricted Windows management agent.
 The launcher displays the LAN address, for example:
 
 ```text
-http://192.168.100.10:8080
+https://192.168.100.10:8443
 ```
 
 Open that address in a browser on each computer or phone connected to the same
 network. Only the server computer needs Docker Desktop. Reserve the server's IP
-address in the router so the URL does not change.
+address in the router so the URL does not change. If the LAN IP changes, start
+the launcher again; it detects the new IP, refreshes the certificate SAN, and
+opens the new HTTPS address automatically. The first browser visit may show a
+certificate warning because this is a local/self-signed certificate; continue
+to the site once on each device, then camera access is available.
 
 ## Data and backups
 

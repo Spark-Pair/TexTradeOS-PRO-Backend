@@ -4,6 +4,7 @@ using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 
@@ -17,6 +18,7 @@ internal sealed class DeploymentService
     internal static readonly string BackupDirectory = Path.Combine(Home, "backups");
     internal static readonly string LicenseDirectory = Path.Combine(Home, "license");
     internal static readonly string ConfigDirectory = Path.Combine(Home, "config");
+    internal static readonly string CertificateDirectory = Path.Combine(Home, "cert");
     internal static readonly string ComposePath = Path.Combine(Home, "docker-compose.yml");
     internal static readonly string EnvironmentPath = Path.Combine(ConfigDirectory, ".env");
     internal static readonly string LicensePath = Path.Combine(LicenseDirectory, "license.json");
@@ -27,7 +29,14 @@ internal sealed class DeploymentService
     internal const string MetadataUrl =
         "https://github.com/Spark-Pair/TexTradeOS-PRO-Backend/releases/latest/download/update.json";
 
-    private readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(15) };
+    private readonly HttpClient _http = new(new HttpClientHandler
+    {
+        // The launcher creates a local self-signed certificate for the detected
+        // LAN address. This client is only used for the local health probe;
+        // browser traffic still shows the normal certificate warning once.
+        ServerCertificateCustomValidationCallback =
+            HttpClientHandler.DangerousAcceptAnyServerCertificateValidator,
+    }) { Timeout = TimeSpan.FromSeconds(15) };
 
     internal void EnsureLayout(FingerprintDocument fingerprint)
     {
@@ -36,6 +45,7 @@ internal sealed class DeploymentService
         Directory.CreateDirectory(BackupDirectory);
         Directory.CreateDirectory(LicenseDirectory);
         Directory.CreateDirectory(ConfigDirectory);
+        Directory.CreateDirectory(CertificateDirectory);
         Directory.CreateDirectory(CommandDirectory);
         Directory.CreateDirectory(ResultDirectory);
 
@@ -46,6 +56,7 @@ internal sealed class DeploymentService
             File.WriteAllText(ComposePath, reader.ReadToEnd());
 
         File.WriteAllText(FingerprintPath, JsonSerializer.Serialize(fingerprint, JsonOptions.Default));
+        EnsureLanCertificate();
         if (!File.Exists(EnvironmentPath))
         {
             var secret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
@@ -53,7 +64,8 @@ internal sealed class DeploymentService
             var managementSecret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
             File.WriteAllText(EnvironmentPath, $"""
 TEXTRADEOS_HOME=C:/ProgramData/TexTradeOS
-APP_PORT=8080
+APP_PORT=8443
+HTTP_PORT=8080
 APP_VERSION={GetLauncherVersion()}
 FRONTEND_IMAGE=ghcr.io/spark-pair/textradeos-frontend:latest
 BACKEND_IMAGE=ghcr.io/spark-pair/textradeos-backend:latest
@@ -66,6 +78,9 @@ MANAGEMENT_SECRET={managementSecret}
         else
         {
             var environment = ReadEnvironment();
+            if (!environment.ContainsKey("HTTP_PORT")) environment["HTTP_PORT"] = "8080";
+            if (environment.GetValueOrDefault("APP_PORT", "8080") == "8080")
+                environment["APP_PORT"] = "8443";
             var launcherVersion = Assembly.GetExecutingAssembly().GetName().Version;
             var installedVersion = launcherVersion is null
                 ? "0.0.0"
@@ -94,10 +109,18 @@ MANAGEMENT_SECRET={managementSecret}
     internal async Task<bool> EnsureDockerAsync(Action<string> log)
     {
         if ((await RunAsync("docker", "info", log, false)).ExitCode == 0) return true;
-        var desktop = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-            "Docker", "Docker", "Docker Desktop.exe");
-        if (!File.Exists(desktop)) return false;
+        var desktopCandidates = new[]
+        {
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                "Docker", "Docker", "Docker Desktop.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                "Docker", "Docker", "Docker Desktop.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Docker", "Docker Desktop.exe"),
+        };
+        var desktop = desktopCandidates.FirstOrDefault(File.Exists);
+        if (desktop is null) return false;
+        log("Docker Desktop is not running. Starting it...");
         Process.Start(new ProcessStartInfo(desktop) { UseShellExecute = true });
         for (var attempt = 0; attempt < 60; attempt++)
         {
@@ -109,6 +132,7 @@ MANAGEMENT_SECRET={managementSecret}
 
     internal async Task StartAsync(Action<string> log)
     {
+        log("Starting TexTradeOS backend and frontend containers...");
         var result = await ComposeAsync("up -d --remove-orphans", log);
         if (result.ExitCode != 0) throw new InvalidOperationException("Docker Compose could not start TexTradeOS.");
         if (!await WaitForHealthAsync(TimeSpan.FromMinutes(2)))
@@ -398,11 +422,11 @@ MANAGEMENT_SECRET={managementSecret}
         return path;
     }
 
-    internal string LocalUrl => "http://127.0.0.1:8080";
-    internal string LanUrl => $"http://{GetLanAddress()}:8080";
+    internal string LocalUrl => "https://127.0.0.1:8443";
+    internal string LanUrl => $"https://{GetLanAddress()}:8443";
 
     internal void OpenApplication(bool setup = false) =>
-        Process.Start(new ProcessStartInfo(setup ? $"{LocalUrl}/setup" : LocalUrl)
+        Process.Start(new ProcessStartInfo(setup ? $"{LanUrl}/setup" : LanUrl)
         {
             UseShellExecute = true,
         });
@@ -410,7 +434,7 @@ MANAGEMENT_SECRET={managementSecret}
     internal async Task ConfigureFirewallAsync(Action<string> log)
     {
         var command =
-            "New-NetFirewallRule -DisplayName 'TexTradeOS LAN' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8080 -Profile Private -ErrorAction SilentlyContinue";
+            "New-NetFirewallRule -DisplayName 'TexTradeOS LAN' -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8080,8443 -Profile Private -ErrorAction SilentlyContinue";
         var arguments =
             $"-NoProfile -Command \"Start-Process powershell.exe -Verb RunAs -Wait -ArgumentList '-NoProfile -Command \"\"{command}\"\"'\"";
         await RunAsync("powershell.exe", arguments, log);
@@ -554,12 +578,58 @@ MANAGEMENT_SECRET={managementSecret}
     {
         var address = NetworkInterface.GetAllNetworkInterfaces()
             .Where(item => item.OperationalStatus == OperationalStatus.Up &&
-                           item.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                           item.NetworkInterfaceType != NetworkInterfaceType.Loopback &&
+                           item.NetworkInterfaceType != NetworkInterfaceType.Tunnel)
             .SelectMany(item => item.GetIPProperties().UnicastAddresses)
             .Select(item => item.Address)
-            .FirstOrDefault(item => item.AddressFamily == AddressFamily.InterNetwork &&
-                                    !IPAddress.IsLoopback(item));
+            .Where(item => item.AddressFamily == AddressFamily.InterNetwork &&
+                           !IPAddress.IsLoopback(item) &&
+                           !item.ToString().StartsWith("169.254.", StringComparison.Ordinal))
+            .OrderByDescending(item => item.ToString().StartsWith("192.168.", StringComparison.Ordinal))
+            .ThenByDescending(item => item.ToString().StartsWith("10.", StringComparison.Ordinal))
+            .FirstOrDefault();
         return address?.ToString() ?? "SERVER-IP";
+    }
+
+    private static void EnsureLanCertificate()
+    {
+        var lanAddress = GetLanAddress();
+        var certificatePath = Path.Combine(CertificateDirectory, "server.crt");
+        var keyPath = Path.Combine(CertificateDirectory, "server.key");
+        var addressPath = Path.Combine(CertificateDirectory, "lan-address.txt");
+
+        try
+        {
+            if (File.Exists(certificatePath) && File.Exists(keyPath) &&
+                File.Exists(addressPath) &&
+                string.Equals(File.ReadAllText(addressPath).Trim(), lanAddress, StringComparison.Ordinal))
+                return;
+        }
+        catch
+        {
+            // A damaged or old certificate is replaced below.
+        }
+
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest("CN=TexTradeOS LAN", rsa,
+            HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        var san = new SubjectAlternativeNameBuilder();
+        if (IPAddress.TryParse(lanAddress, out var ip)) san.AddIpAddress(ip);
+        san.AddIpAddress(IPAddress.Loopback);
+        san.AddDnsName("localhost");
+        san.AddDnsName(Environment.MachineName);
+        request.CertificateExtensions.Add(san.Build());
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, false));
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(
+            X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, false));
+        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(
+            new OidCollection { new("1.3.6.1.5.5.7.3.1") }, false));
+
+        using var certificate = request.CreateSelfSigned(
+            DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddYears(2));
+        File.WriteAllText(certificatePath, certificate.ExportCertificatePem());
+        File.WriteAllText(keyPath, rsa.ExportPkcs8PrivateKeyPem());
+        File.WriteAllText(addressPath, lanAddress);
     }
 
     private static void DeleteWalFiles()

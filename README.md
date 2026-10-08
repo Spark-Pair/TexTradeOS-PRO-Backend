@@ -16,7 +16,7 @@ and all update checks. Production does not load this development environment.
 
 ## Production architecture
 
-- Nginx frontend exposed on LAN port `8080`
+- Nginx frontend exposed on LAN HTTPS port `8443` (HTTP `8080` redirects)
 - One internal Node.js backend container
 - SQLite stored at `C:\ProgramData\TexTradeOS\data`
 - License and fingerprint stored at `C:\ProgramData\TexTradeOS\license`
@@ -94,4 +94,5 @@ the Windows installer.
 ## Customer network
 
 Reserve a stable LAN address for the server PC in the router. Client devices
-open `http://SERVER-IP:8080`. Only the server PC requires Docker Desktop.
+open `https://SERVER-IP:8443`. HTTP on port `8080` redirects automatically.
+Only the server PC requires Docker Desktop.

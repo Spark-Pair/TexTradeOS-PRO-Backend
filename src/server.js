@@ -2,8 +2,8 @@ import "dotenv/config";
 import app from "./app.js";
 import { env } from "./config/environment.js";
 
-const server = app.listen(env.port, () => {
-  console.log(`TexTradeOS PRO Backend running on http://localhost:${env.port}`);
+const server = app.listen(env.port, env.host, () => {
+  console.log(`TexTradeOS PRO Backend running on ${env.host}:${env.port}`);
 });
 
 const shutdown = (signal) => {

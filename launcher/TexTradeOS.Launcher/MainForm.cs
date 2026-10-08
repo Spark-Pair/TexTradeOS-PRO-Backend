@@ -609,7 +609,13 @@ internal sealed class MainForm : Form
 
             if (_openOnly)
             {
-                SetStatus("Opening TexTradeOS PRO...", 90, "Launching...");
+                SetStatus("Checking Docker Desktop...", 45, "Docker...");
+                if (!await _deployment.EnsureDockerAsync(Log))
+                    throw new InvalidOperationException(
+                        "Docker Desktop is not installed or the Docker engine could not start.");
+                SetStatus("Starting TexTradeOS PRO services...", 75, "Services...");
+                await _deployment.StartAsync(Log);
+                SetStatus("Opening TexTradeOS PRO...", 95, "Launching...");
                 await EnsureMinimumSplashTimeAsync(shownAt);
                 var lic = LicenseService.Validate(DeploymentService.LicensePath, _fingerprint);
                 _deployment.OpenApplication(!lic.Allowed);
