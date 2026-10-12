@@ -3,7 +3,7 @@ import { db } from "./connection.js";
 export const ensureCoreSchema = () => {
   db.exec(`
     CREATE TABLE IF NOT EXISTS businesses (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, person TEXT DEFAULT '', price REAL DEFAULT 0,
+      id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, person TEXT DEFAULT '', phone TEXT DEFAULT '', email TEXT DEFAULT '', address TEXT DEFAULT '', urdu_name TEXT DEFAULT '', tax_number TEXT DEFAULT '', price REAL DEFAULT 0,
       registration_date TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, reference_data TEXT NOT NULL,
       rule_data TEXT NOT NULL, invoice_banner_data TEXT DEFAULT '', machine_options TEXT NOT NULL DEFAULT '[]',
       invoice_counter_year INTEGER NOT NULL DEFAULT 2026, invoice_counter_last INTEGER NOT NULL DEFAULT 0,
@@ -27,6 +27,7 @@ export const ensureCoreSchema = () => {
       percent_discount_amount REAL NOT NULL DEFAULT 0, rupee_discount_amount REAL NOT NULL DEFAULT 0,
       total_discount_amount REAL NOT NULL DEFAULT 0, net_amount REAL NOT NULL DEFAULT 0, sales_return_amount REAL NOT NULL DEFAULT 0,
       received_amount REAL NOT NULL DEFAULT 0, balance_amount REAL NOT NULL DEFAULT 0, return_amount REAL NOT NULL DEFAULT 0,
+      customer_balance_before REAL NOT NULL DEFAULT 0, customer_balance_after REAL NOT NULL DEFAULT 0,
       total_amount REAL NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
       UNIQUE (business_id, invoice_number), FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,
       FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
@@ -53,13 +54,14 @@ export const ensureCoreSchema = () => {
   };
 
   ensureColumn("users", "shortcuts", "TEXT NOT NULL DEFAULT '{}'");
+  [["phone", "TEXT DEFAULT ''"], ["email", "TEXT DEFAULT ''"], ["address", "TEXT DEFAULT ''"], ["urdu_name", "TEXT DEFAULT ''"], ["tax_number", "TEXT DEFAULT ''"]].forEach(([name, definition]) => ensureColumn("businesses", name, definition));
   [
     ["customer_urdu_title", "TEXT DEFAULT ''"], ["salesman_name", "TEXT DEFAULT ''"],
     ["gross_amount", "REAL NOT NULL DEFAULT 0"], ["percent_discount_amount", "REAL NOT NULL DEFAULT 0"],
     ["rupee_discount_amount", "REAL NOT NULL DEFAULT 0"], ["total_discount_amount", "REAL NOT NULL DEFAULT 0"],
     ["net_amount", "REAL NOT NULL DEFAULT 0"], ["sales_return_amount", "REAL NOT NULL DEFAULT 0"],
     ["received_amount", "REAL NOT NULL DEFAULT 0"], ["balance_amount", "REAL NOT NULL DEFAULT 0"],
-    ["return_amount", "REAL NOT NULL DEFAULT 0"],
+    ["return_amount", "REAL NOT NULL DEFAULT 0"], ["customer_balance_before", "REAL NOT NULL DEFAULT 0"], ["customer_balance_after", "REAL NOT NULL DEFAULT 0"],
   ].forEach(([name, definition]) => ensureColumn("invoices", name, definition));
   [
     ["gross_amount", "REAL NOT NULL DEFAULT 0"], ["discount_type", "TEXT DEFAULT ''"],

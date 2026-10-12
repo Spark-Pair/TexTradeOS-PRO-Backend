@@ -9,6 +9,8 @@ const send = (res, action) => {
 };
 
 export const BusinessController = {
+  profile: (req, res) => send(res, () => BusinessService.profile(req.user)),
+  updateProfile: (req, res) => send(res, () => BusinessService.updateProfile(req.user, req.body?.business)),
   referenceData: (req, res) => send(res, () => BusinessService.referenceData(req.user)),
   updateReferenceData: (req, res) => send(res, () => BusinessService.updateReferenceData(req.user, req.body?.reference_data)),
   ruleData: (req, res) => send(res, () => BusinessService.ruleData(req.user)),

@@ -12,7 +12,7 @@ export const toUserDto = (row) => {
     _id: String(row.id),
     id: String(row.id),
     businessId: row.business_id ? String(row.business_id) : null,
-    business: row.business_id ? { id: String(row.business_id), name: row.business_name || "" } : null,
+    business: row.business_id ? { id: String(row.business_id), name: row.business_name || "", person: row.business_person || "", phone: row.business_phone || "", email: row.business_email || "", address: row.business_address || "", urdu_name: row.business_urdu_name || "", tax_number: row.business_tax_number || "" } : null,
     business_name: row.business_name || "",
     name: row.name,
     username: row.username,
@@ -58,6 +58,8 @@ export const toInvoiceDto = (row, articles = []) => {
     balance_amount: Number(row.balance_amount || Math.max(0, totalAmount - receivedAmount)),
     return_amount: Number(row.return_amount || Math.max(0, receivedAmount - totalAmount)),
     total_amount: totalAmount,
+    customer_balance_before: Number(row.customer_balance_before || 0),
+    customer_balance_after: Number(row.customer_balance_after || 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

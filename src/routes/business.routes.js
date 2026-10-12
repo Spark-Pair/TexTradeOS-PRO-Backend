@@ -4,6 +4,8 @@ import { requireAuth, requireBusinessAdmin } from "../middleware/auth.middleware
 
 const router = Router();
 router.use(requireAuth);
+router.get("/me", BusinessController.profile);
+router.patch("/me", requireBusinessAdmin, BusinessController.updateProfile);
 
 router.get("/me/reference-data", BusinessController.referenceData);
 router.patch("/me/reference-data", requireBusinessAdmin, BusinessController.updateReferenceData);

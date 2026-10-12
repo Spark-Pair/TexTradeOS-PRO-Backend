@@ -13,7 +13,7 @@ export const seedFreshDatabase = () => {
         invoice_banner_data, machine_options, invoice_counter_year, invoice_counter_last, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      "TexTradeOS PRO", "", 0, createdAt, 1,
+      "", "", 0, createdAt, 1,
       JSON.stringify(defaultReferenceData()), JSON.stringify(defaultRuleData()),
       "", "[]", new Date().getFullYear(), 0, createdAt, createdAt
     );
