@@ -33,7 +33,7 @@ export const ensureCoreSchema = () => {
     );
     CREATE TABLE IF NOT EXISTS invoice_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT, invoice_id INTEGER NOT NULL, position INTEGER NOT NULL, size TEXT DEFAULT '',
-      description TEXT DEFAULT '', dzn REAL NOT NULL DEFAULT 0, pcs REAL NOT NULL DEFAULT 0, rate REAL NOT NULL DEFAULT 0,
+      description TEXT DEFAULT NULL, dzn REAL NOT NULL DEFAULT 0, pcs REAL NOT NULL DEFAULT 0, rate REAL NOT NULL DEFAULT 0,
       gross_amount REAL NOT NULL DEFAULT 0, discount TEXT DEFAULT '', discount_type TEXT DEFAULT '',
       discount_amount REAL NOT NULL DEFAULT 0, amount REAL NOT NULL DEFAULT 0,
       FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
