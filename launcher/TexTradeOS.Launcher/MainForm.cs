@@ -612,7 +612,7 @@ internal sealed class MainForm : Form
                 SetStatus("Checking Docker Desktop...", 45, "Docker...");
                 if (!await _deployment.EnsureDockerAsync(Log))
                     throw new InvalidOperationException(
-                        "Docker Desktop is not installed or the Docker engine could not start.");
+                        "Docker Desktop could not be started and made ready. Check that Docker Desktop is installed, then see the launcher log at C:\\ProgramData\\TexTradeOS\\data\\launcher.log.");
                 SetStatus("Starting TexTradeOS PRO services...", 75, "Services...");
                 await _deployment.StartAsync(Log);
                 SetStatus("Opening TexTradeOS PRO...", 95, "Launching...");
@@ -629,7 +629,7 @@ internal sealed class MainForm : Form
             SetStatus("Starting Docker Desktop...", 45, "Docker up");
             if (!await _deployment.EnsureDockerAsync(Log))
                 throw new InvalidOperationException(
-                    "Docker Desktop is not installed or the Docker engine could not start.");
+                    "Docker Desktop could not be started and made ready. Check that Docker Desktop is installed, then see the launcher log at C:\\ProgramData\\TexTradeOS\\data\\launcher.log.");
 
             SetStatus("Starting TexTradeOS PRO services...", 70, "Services up");
             await _deployment.StartAsync(Log);

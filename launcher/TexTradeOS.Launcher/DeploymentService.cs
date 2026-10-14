@@ -108,25 +108,87 @@ MANAGEMENT_SECRET={managementSecret}
 
     internal async Task<bool> EnsureDockerAsync(Action<string> log)
     {
-        if ((await RunAsync("docker", "info", log, false)).ExitCode == 0) return true;
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var desktopCandidates = new[]
         {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-                "Docker", "Docker", "Docker Desktop.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-                "Docker", "Docker", "Docker Desktop.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Docker", "Docker Desktop.exe"),
+            Path.Combine(programFiles, "Docker", "Docker", "Docker Desktop.exe"),
+            Path.Combine(programFilesX86, "Docker", "Docker", "Docker Desktop.exe"),
+            Path.Combine(localAppData, "Programs", "Docker", "Docker", "Docker Desktop.exe"),
+            Path.Combine(localAppData, "Docker", "Docker Desktop.exe"),
         };
-        var desktop = desktopCandidates.FirstOrDefault(File.Exists);
-        if (desktop is null) return false;
-        log("Docker Desktop is not running. Starting it...");
-        Process.Start(new ProcessStartInfo(desktop) { UseShellExecute = true });
-        for (var attempt = 0; attempt < 60; attempt++)
+        var dockerDirectories = new[]
         {
-            await Task.Delay(2000);
-            if ((await RunAsync("docker", "info", log, false)).ExitCode == 0) return true;
+            Path.Combine(programFiles, "Docker", "Docker", "resources", "bin"),
+            Path.Combine(programFilesX86, "Docker", "Docker", "resources", "bin"),
+            Path.Combine(localAppData, "Programs", "Docker", "Docker", "resources", "bin"),
+        };
+
+        // A launcher started from a shortcut may inherit a stale or incomplete PATH.
+        // Docker Desktop's own CLI location is stable even when the shell PATH is not.
+        var dockerCli = dockerDirectories
+            .Select(directory => Path.Combine(directory, "docker.exe"))
+            .FirstOrDefault(File.Exists);
+        if (dockerCli is not null)
+        {
+            var currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+            var cliDirectory = Path.GetDirectoryName(dockerCli)!;
+            if (!currentPath.Split(Path.PathSeparator).Contains(cliDirectory,
+                    StringComparer.OrdinalIgnoreCase))
+                Environment.SetEnvironmentVariable("PATH", $"{cliDirectory}{Path.PathSeparator}{currentPath}");
         }
+
+        async Task<bool> EngineReadyAsync()
+        {
+            try { return (await RunAsync("docker", "info", log, false)).ExitCode == 0; }
+            catch (Exception error)
+            {
+                log($"Docker CLI check failed: {error.Message}");
+                return false;
+            }
+        }
+
+        if (await EngineReadyAsync()) return true;
+
+        var desktop = desktopCandidates.FirstOrDefault(File.Exists);
+        if (desktop is null)
+        {
+            log("Docker Desktop executable was not found in the standard per-machine or per-user locations.");
+            return false;
+        }
+
+        log($"Docker engine is not ready. Starting Docker Desktop from: {desktop}");
+        try
+        {
+            Process.Start(new ProcessStartInfo(desktop)
+            {
+                UseShellExecute = true,
+                WorkingDirectory = Path.GetDirectoryName(desktop)!,
+            });
+        }
+        catch (Exception error)
+        {
+            log($"Docker Desktop launch failed: {error.Message}");
+            return false;
+        }
+
+        // Desktop can take a while on first start or while WSL is waking up.
+        // Keep checking the engine instead of treating process launch as readiness.
+        const int maxAttempts = 120;
+        for (var attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            if (await EngineReadyAsync())
+            {
+                log("Docker engine is ready.");
+                return true;
+            }
+            if ((attempt + 1) % 15 == 0)
+                log($"Still waiting for Docker engine ({(attempt + 1) * 2}s)...");
+        }
+
+        log("Docker Desktop was opened, but its engine did not become ready within 4 minutes.");
         return false;
     }
 
