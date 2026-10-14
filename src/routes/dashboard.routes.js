@@ -5,5 +5,6 @@ import { requireAuth } from "../middleware/auth.middleware.js";
 const router = Router();
 router.use(requireAuth);
 router.get("/trend", DashboardController.trend);
+router.get("/summary", DashboardController.summary);
 
 export default router;
