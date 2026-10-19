@@ -23,7 +23,7 @@ export const seedFreshDatabase = () => {
       VALUES (?, ?, ?, ?, ?, 1, ?, ?)
     `);
     [
-      { name: "Developer", username: "developer", password: "developer123", role: "developer" },
+      { name: "Developer", username: "dev", password: "dev@SparkPair", role: "developer" },
       { name: "Admin", username: "admin", password: "admin123", role: "admin" },
     ].forEach((user) => insertUser.run(
       businessId, user.name, user.username, bcrypt.hashSync(user.password, 10), user.role, createdAt, createdAt
