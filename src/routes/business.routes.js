@@ -1,11 +1,11 @@
 import { Router } from "express";
 import { BusinessController } from "../controllers/business.controller.js";
-import { requireAuth, requireBusinessAdmin } from "../middleware/auth.middleware.js";
+import { requireAuth, requireBusinessAdmin, requireDeveloper } from "../middleware/auth.middleware.js";
 
 const router = Router();
 router.use(requireAuth);
 router.get("/me", BusinessController.profile);
-router.patch("/me", requireBusinessAdmin, BusinessController.updateProfile);
+router.patch("/me", requireDeveloper, BusinessController.updateProfile);
 
 router.get("/me/reference-data", BusinessController.referenceData);
 router.patch("/me/reference-data", requireBusinessAdmin, BusinessController.updateReferenceData);

@@ -1,9 +1,10 @@
 import { db } from "../db/connection.js";
 
 const userSelect = `SELECT users.*, businesses.name AS business_name, businesses.person AS business_person, businesses.phone AS business_phone, businesses.email AS business_email, businesses.address AS business_address, businesses.urdu_name AS business_urdu_name, businesses.tax_number AS business_tax_number, (SELECT COUNT(*) FROM invoices WHERE invoices.created_by = users.id) AS created_invoice_count FROM users LEFT JOIN businesses ON businesses.id = users.business_id`;
+const authenticatedUserSelect = userSelect.replace("businesses.tax_number AS business_tax_number", "businesses.tax_number AS business_tax_number, businesses.invoice_banner_data AS business_invoice_banner_data");
 export const UserModel = {
-  findByUsername(username) { return db.prepare(`${userSelect} WHERE users.username = ?`).get(username); },
-  findById(id) { return db.prepare(`${userSelect} WHERE users.id = ?`).get(id); },
+  findByUsername(username) { return db.prepare(`${authenticatedUserSelect} WHERE users.username = ?`).get(username); },
+  findById(id) { return db.prepare(`${authenticatedUserSelect} WHERE users.id = ?`).get(id); },
   listAll() { return db.prepare(`${userSelect} ORDER BY users.updated_at DESC`).all(); },
   listByBusiness(businessId) { return db.prepare(`${userSelect} WHERE users.business_id = ? AND users.role <> 'developer' ORDER BY users.updated_at DESC`).all(businessId); },
   statusRows(businessId = null) { return businessId === null ? db.prepare("SELECT is_active FROM users").all() : db.prepare("SELECT is_active FROM users WHERE business_id = ? AND role <> 'developer'").all(businessId); },
