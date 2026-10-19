@@ -8,7 +8,7 @@
 - Added a Customized Invoice switch; it defaults to off and selects the default Customer 1 invoice when disabled.
 - Added PNG/SVG logo validation, size limits, and SVG safety checks.
 - Added SparkPair footer credit and contact number to invoices.
-- Added developer-configurable invoice summary fields, zero-value hiding, compact spacing, and single/dual summary boxes.
+- Added developer-configurable invoice summary fields, per-field zero-value hiding, compact spacing, and single/dual summary boxes.
 
 ## Changed
 
