@@ -5,6 +5,8 @@ export function createPartyRouter(requireAuth) {
   const router = express.Router();
   router.use(requireAuth);
   router.get("/payments", PartyController.payments);
+  router.put("/party-payments/:id", PartyController.updatePayment);
+  router.delete("/party-payments/:id", PartyController.deletePayment);
 
   for (const kind of ["customers", "suppliers"]) {
     router.get(`/${kind}`, PartyController.list(kind));

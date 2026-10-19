@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
-import { getParty, getPartyBalance, getPartyLedger, getPartyPayment, insertPartyPayment, listParties, listPayments, setPartyStatus, upsertParty } from "./party.model.js";
+import { db } from "../../db/connection.js";
+import { deletePartyPayment as removePartyPayment, getParty, getPartyBalance, getPartyLedger, getPartyPayment, insertPartyPayment, listParties, listPayments, setPartyStatus, updatePartyPayment as persistPartyPayment, upsertParty } from "./party.model.js";
 
 const text = (value) => String(value || "").trim();
 const num = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
@@ -39,9 +40,37 @@ export const createPartyPayment = (kind, businessId, userId, id, payload = {}) =
   const existing = getParty(kind, businessId, id);
   if (!existing) throw notFound(kind);
   const method = text(payload.method).toLowerCase();
+  const chequeType = method === "self_cheque" ? "self" : text(payload.cheque_type);
+  const normalizedMethod = method === "self_cheque" ? "cheque" : method;
   const amount = num(payload.amount);
-  if (!methods.has(method)) throw Object.assign(new Error("Invalid payment method"), { statusCode: 400 });
+  if (!methods.has(normalizedMethod)) throw Object.assign(new Error("Invalid payment method"), { statusCode: 400 });
   if (amount <= 0) throw Object.assign(new Error("Payment amount must be greater than zero"), { statusCode: 400 });
+  const bankAccountId = text(payload.bank_account_id);
+  const sourcePaymentId = text(payload.source_payment_id);
+  const chequeNo = text(payload.cheque_no);
+  const chequeAccountId = text(payload.cheque_account_id);
+  const clearingDate = normalizedMethod === "cheque" || normalizedMethod === "slip" ? text(payload.clearing_date) : "";
+  if (chequeType === "self" && partyType(kind) !== "supplier") throw Object.assign(new Error("Self cheque can only be issued to a supplier"), { statusCode: 400 });
+  if (normalizedMethod === "online" && !bankAccountId) throw Object.assign(new Error("Online payment account is required"), { statusCode: 400 });
+  let bankAccount = null;
+  if (bankAccountId) {
+    bankAccount = db.prepare("SELECT * FROM bank_accounts WHERE business_id=? AND id=? AND is_active=1").get(businessId, bankAccountId);
+    const allowedCategories = partyType(kind) === "supplier" && normalizedMethod === "online" ? ["customer", "self"] : ["supplier", "self"];
+    if (!bankAccount || !allowedCategories.includes(bankAccount.category)) throw Object.assign(new Error("Invalid payment account"), { statusCode: 400 });
+  }
+  if (sourcePaymentId) {
+    if (partyType(kind) !== "supplier") throw Object.assign(new Error("Pending customer instruments can only be used for supplier payments"), { statusCode: 400 });
+    const source = db.prepare("SELECT * FROM party_payments WHERE business_id=? AND id=? AND party_type='customer' AND method IN ('cheque','slip')").get(businessId, sourcePaymentId);
+    const alreadyUsed = db.prepare("SELECT id FROM party_payments WHERE business_id=? AND source_payment_id=?").get(businessId, sourcePaymentId);
+    if (!source || alreadyUsed) throw Object.assign(new Error("Selected cheque/slip is no longer pending"), { statusCode: 400 });
+    if (normalizedMethod !== source.method) throw Object.assign(new Error("Selected payment instrument method does not match"), { statusCode: 400 });
+  }
+  if (chequeType === "self") {
+    const selfAccount = db.prepare("SELECT * FROM bank_accounts WHERE business_id=? AND id=? AND category='self' AND is_active=1").get(businessId, chequeAccountId);
+    if (!selfAccount || !chequeNo) throw Object.assign(new Error("Self cheque account and cheque number are required"), { statusCode: 400 });
+    const used = db.prepare("SELECT id FROM party_payments WHERE business_id=? AND cheque_type='self' AND cheque_account_id=? AND cheque_no=?").get(businessId, chequeAccountId, chequeNo);
+    if (used) throw Object.assign(new Error("This self cheque has already been issued"), { statusCode: 409 });
+  }
   const ts = new Date().toISOString();
   const paymentDate = text(payload.payment_date) || ts.slice(0, 10);
   const result = insertPartyPayment([
@@ -50,31 +79,119 @@ export const createPartyPayment = (kind, businessId, userId, id, payload = {}) =
     existing.id,
     userId,
     paymentDate,
-    method,
+    normalizedMethod,
     amount,
-    method === "cash" ? "" : text(payload.reference_no),
-    method === "cheque" ? text(payload.bank_name) : "",
-    method === "cheque" ? text(payload.cheque_date) : "",
-    method === "slip" ? text(payload.slip_date) : "",
+    chequeType === "self" ? chequeNo : normalizedMethod === "cash" ? "" : text(payload.reference_no),
+    normalizedMethod === "cheque" ? text(payload.bank_name) : "",
+    normalizedMethod === "cheque" ? text(payload.cheque_date) : "",
+    normalizedMethod === "slip" ? text(payload.slip_date) : "",
     text(payload.notes),
+    bankAccountId,
+    clearingDate,
+    chequeType,
+    chequeNo,
+    chequeAccountId,
+    sourcePaymentId,
     ts,
     ts,
   ]);
   return { payment: getPartyPayment(businessId, result.lastInsertRowid), party: toDto(kind, existing, getPartyBalance(kind, businessId, existing.id)) };
 };
 
+export const updatePartyPayment = (businessId, userId, id, payload = {}) => {
+  const existingPayment = getPartyPayment(businessId, id);
+  if (!existingPayment) throw Object.assign(new Error("Payment not found"), { statusCode: 404 });
+  const targetKind = text(payload.party_type) === "supplier" ? "suppliers" : "customers";
+  const targetParty = getParty(targetKind, businessId, text(payload.party_id) || existingPayment.party_id);
+  if (!targetParty) throw Object.assign(new Error("Selected party not found"), { statusCode: 404 });
+  const method = text(payload.method).toLowerCase();
+  const chequeType = method === "self_cheque" ? "self" : text(payload.cheque_type);
+  const normalizedMethod = method === "self_cheque" ? "cheque" : method;
+  const amount = num(payload.amount);
+  if (!methods.has(normalizedMethod)) throw Object.assign(new Error("Invalid payment method"), { statusCode: 400 });
+  if (amount <= 0) throw Object.assign(new Error("Payment amount must be greater than zero"), { statusCode: 400 });
+  if (chequeType === "self" && targetKind !== "suppliers") throw Object.assign(new Error("Self cheque can only be issued to a supplier"), { statusCode: 400 });
+  const bankAccountId = text(payload.bank_account_id);
+  const sourcePaymentId = text(payload.source_payment_id);
+  const chequeNo = text(payload.cheque_no);
+  const chequeAccountId = text(payload.cheque_account_id);
+  const clearingDate = normalizedMethod === "cheque" || normalizedMethod === "slip" ? text(payload.clearing_date) : "";
+  if (normalizedMethod === "online" && !bankAccountId) throw Object.assign(new Error("Online payment account is required"), { statusCode: 400 });
+  if (bankAccountId) {
+    const account = db.prepare("SELECT * FROM bank_accounts WHERE business_id=? AND id=? AND is_active=1").get(businessId, bankAccountId);
+    const allowedCategories = targetKind === "suppliers" && normalizedMethod === "online" ? ["customer", "self"] : ["supplier", "self"];
+    if (!account || !allowedCategories.includes(account.category)) throw Object.assign(new Error("Invalid payment account"), { statusCode: 400 });
+  }
+  if (sourcePaymentId) {
+    if (targetKind !== "suppliers") throw Object.assign(new Error("Pending customer instruments can only be used for supplier payments"), { statusCode: 400 });
+    const source = db.prepare("SELECT * FROM party_payments WHERE business_id=? AND id=? AND party_type='customer' AND method IN ('cheque','slip')").get(businessId, sourcePaymentId);
+    const alreadyUsed = db.prepare("SELECT id FROM party_payments WHERE business_id=? AND source_payment_id=? AND id<>?").get(businessId, sourcePaymentId, id);
+    if (!source || alreadyUsed) throw Object.assign(new Error("Selected cheque/slip is no longer pending"), { statusCode: 400 });
+    if (normalizedMethod !== source.method) throw Object.assign(new Error("Selected payment instrument method does not match"), { statusCode: 400 });
+  }
+  if (chequeType === "self") {
+    const selfAccount = db.prepare("SELECT * FROM bank_accounts WHERE business_id=? AND id=? AND category='self' AND is_active=1").get(businessId, chequeAccountId);
+    const used = db.prepare("SELECT id FROM party_payments WHERE business_id=? AND cheque_type='self' AND cheque_account_id=? AND cheque_no=? AND id<>?").get(businessId, chequeAccountId, chequeNo, id);
+    if (!selfAccount || !chequeNo) throw Object.assign(new Error("Self cheque account and cheque number are required"), { statusCode: 400 });
+    if (used) throw Object.assign(new Error("This self cheque has already been issued"), { statusCode: 409 });
+  }
+  const ts = new Date().toISOString();
+  persistPartyPayment(businessId, id, [
+    targetKind === "suppliers" ? "supplier" : "customer",
+    targetParty.id,
+    text(payload.payment_date) || existingPayment.payment_date,
+    normalizedMethod,
+    amount,
+    chequeType === "self" ? chequeNo : normalizedMethod === "cash" ? "" : text(payload.reference_no),
+    normalizedMethod === "cheque" ? text(payload.bank_name) : "",
+    normalizedMethod === "cheque" ? text(payload.cheque_date) : "",
+    normalizedMethod === "slip" ? text(payload.slip_date) : "",
+    text(payload.notes),
+    bankAccountId,
+    clearingDate,
+    chequeType,
+    chequeNo,
+    chequeAccountId,
+    sourcePaymentId,
+    ts,
+  ]);
+  return { payment: getPartyPayment(businessId, id) };
+};
+
+export const deletePartyPayment = (businessId, id) => {
+  const payment = getPartyPayment(businessId, id);
+  if (!payment) throw Object.assign(new Error("Payment not found"), { statusCode: 404 });
+  const linked = db.prepare("SELECT id FROM party_payments WHERE business_id=? AND source_payment_id=? AND id<>?").get(businessId, String(id), id);
+  if (linked) throw Object.assign(new Error("This payment is already assigned to a supplier payment. Delete the linked supplier payment first."), { statusCode: 409 });
+  removePartyPayment(businessId, id);
+  return { id: String(id) };
+};
+
 export const listPaymentDtos = (businessId, filters = {}) => listPayments(businessId, filters).map((row) => ({
   id: `${row.source}-${row.id}`,
+  payment_id: row.source === "party" ? String(row.id) : "",
   source: row.source,
   party_type: row.party_type,
   party_id: row.party_id || "",
   party_name: row.party_name || "",
   payment_date: row.payment_date || "",
-  method: row.method || "",
+  method: row.cheque_type === "self" ? "self_cheque" : row.method || "",
   amount: Number(row.amount || 0),
-  reference_no: row.reference_no || "",
+  reference_no: row.reference_no || row.cheque_no || "",
   bank_name: row.bank_name || "",
   cheque_date: row.cheque_date || "",
   slip_date: row.slip_date || "",
+  clearing_date: row.clearing_date || "",
+  cheque_type: row.cheque_type || "",
+  cheque_no: row.cheque_no || "",
+  cheque_account_id: row.cheque_account_id || "",
+  source_payment_id: row.source_payment_id || "",
+  bank_account_id: row.bank_account_id || "",
+  destination_category: row.destination_category || "",
+  destination_party_id: row.destination_party_id || "",
+  destination_account_title: row.destination_account_title || "",
+  destination_bank_name: row.destination_bank_name || "",
+  cheque_account_title: row.cheque_account_title || "",
+  cheque_account_bank: row.cheque_account_bank || "",
   notes: row.notes || "",
 }));

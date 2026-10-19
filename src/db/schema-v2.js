@@ -20,8 +20,10 @@ export function ensureCommerceSchemaV2() {
     CREATE TABLE IF NOT EXISTS return_items (id INTEGER PRIMARY KEY AUTOINCREMENT,return_id INTEGER NOT NULL,position INTEGER NOT NULL,article_no TEXT NOT NULL,purchase_number TEXT DEFAULT '',qr_id TEXT DEFAULT '',source_document_id TEXT DEFAULT '',description TEXT DEFAULT '',pcs REAL NOT NULL,rate REAL NOT NULL DEFAULT 0,gross_amount REAL NOT NULL DEFAULT 0,amount REAL NOT NULL DEFAULT 0,FOREIGN KEY (return_id) REFERENCES returns(id) ON DELETE CASCADE);
     CREATE TABLE IF NOT EXISTS invoice_payments (id INTEGER PRIMARY KEY AUTOINCREMENT,business_id INTEGER NOT NULL,invoice_id INTEGER NOT NULL,created_by INTEGER,payment_date TEXT NOT NULL,method TEXT NOT NULL CHECK(method IN ('cash','cheque','slip','online')),amount REAL NOT NULL,reference_no TEXT DEFAULT '',account_name TEXT DEFAULT '',bank_name TEXT DEFAULT '',cheque_no TEXT DEFAULT '',cheque_date TEXT DEFAULT '',slip_no TEXT DEFAULT '',transaction_id TEXT DEFAULT '',notes TEXT DEFAULT '',metadata TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL,updated_at TEXT NOT NULL,FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL);
     CREATE TABLE IF NOT EXISTS party_payments (id INTEGER PRIMARY KEY AUTOINCREMENT,business_id INTEGER NOT NULL,party_type TEXT NOT NULL CHECK(party_type IN ('customer','supplier')),party_id TEXT NOT NULL,created_by INTEGER,payment_date TEXT NOT NULL,method TEXT NOT NULL CHECK(method IN ('cash','cheque','slip','online')),amount REAL NOT NULL,reference_no TEXT DEFAULT '',bank_name TEXT DEFAULT '',cheque_date TEXT DEFAULT '',slip_date TEXT DEFAULT '',notes TEXT DEFAULT '',created_at TEXT NOT NULL,updated_at TEXT NOT NULL,FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL);
+    CREATE TABLE IF NOT EXISTS bank_accounts (id TEXT PRIMARY KEY,business_id INTEGER NOT NULL,category TEXT NOT NULL CHECK(category IN ('customer','supplier','self')),account_title TEXT NOT NULL,account_no TEXT DEFAULT '',bank_name TEXT DEFAULT '',cheque_serial_start TEXT DEFAULT '',cheque_serial_end TEXT DEFAULT '',is_active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE);
     CREATE TABLE IF NOT EXISTS expenses (id INTEGER PRIMARY KEY AUTOINCREMENT,business_id INTEGER NOT NULL,created_by INTEGER,expense_date TEXT NOT NULL,category TEXT NOT NULL,paid_to TEXT DEFAULT '',method TEXT NOT NULL CHECK(method IN ('cash','cheque','slip','online')),amount REAL NOT NULL,reference_no TEXT DEFAULT '',bank_name TEXT DEFAULT '',cheque_date TEXT DEFAULT '',slip_date TEXT DEFAULT '',notes TEXT DEFAULT '',created_at TEXT NOT NULL,updated_at TEXT NOT NULL,FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL);
     CREATE TABLE IF NOT EXISTS inventory_movements (id INTEGER PRIMARY KEY AUTOINCREMENT,business_id INTEGER NOT NULL,movement_type TEXT NOT NULL,article_no TEXT NOT NULL,purchase_number TEXT DEFAULT '',pcs REAL NOT NULL,reference_type TEXT NOT NULL,reference_id TEXT NOT NULL,notes TEXT DEFAULT '',created_at TEXT NOT NULL,FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE);
+    CREATE TABLE IF NOT EXISTS payment_clearances (id INTEGER PRIMARY KEY AUTOINCREMENT,business_id INTEGER NOT NULL,payment_source TEXT NOT NULL CHECK(payment_source IN ('party','invoice')),payment_id INTEGER NOT NULL,created_by INTEGER,clearance_date TEXT NOT NULL,clearance_method TEXT NOT NULL CHECK(clearance_method IN ('transfer','online')),amount REAL NOT NULL,reference_no TEXT DEFAULT '',bank_account_id TEXT DEFAULT '',notes TEXT DEFAULT '',created_at TEXT NOT NULL,updated_at TEXT NOT NULL,FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL);
     CREATE INDEX IF NOT EXISTS idx_suppliers_business_name ON suppliers(business_id, supplier_name);
     CREATE INDEX IF NOT EXISTS idx_customers_business_name ON customers(business_id, customer_name);
     CREATE INDEX IF NOT EXISTS idx_purchases_business_date ON purchases(business_id, purchase_date DESC);
@@ -32,9 +34,22 @@ export function ensureCommerceSchemaV2() {
     CREATE INDEX IF NOT EXISTS idx_return_items_article ON return_items(article_no, purchase_number);
     CREATE INDEX IF NOT EXISTS idx_invoice_payments_invoice ON invoice_payments(invoice_id, payment_date);
     CREATE INDEX IF NOT EXISTS idx_party_payments_party ON party_payments(business_id, party_type, party_id, payment_date);
+    CREATE INDEX IF NOT EXISTS idx_bank_accounts_business ON bank_accounts(business_id, category, is_active);
     CREATE INDEX IF NOT EXISTS idx_expenses_business_date ON expenses(business_id, expense_date DESC);
     CREATE INDEX IF NOT EXISTS idx_inventory_movements_article ON inventory_movements(business_id, article_no, purchase_number);
+    CREATE INDEX IF NOT EXISTS idx_payment_clearances_payment ON payment_clearances(business_id, payment_source, payment_id, clearance_date);
   `);
+
+  addColumn("bank_accounts", "party_id", "TEXT DEFAULT ''");
+  addColumn("party_payments", "bank_account_id", "TEXT DEFAULT ''");
+  addColumn("party_payments", "clearing_date", "TEXT DEFAULT ''");
+  addColumn("party_payments", "cheque_type", "TEXT DEFAULT ''");
+  addColumn("party_payments", "cheque_no", "TEXT DEFAULT ''");
+  addColumn("party_payments", "cheque_account_id", "TEXT DEFAULT ''");
+  addColumn("party_payments", "source_payment_id", "TEXT DEFAULT ''");
+  addColumn("payment_clearances", "settlement_method", "TEXT DEFAULT ''");
+  addColumn("payment_clearances", "settlement_bank_name", "TEXT DEFAULT ''");
+  addColumn("payment_clearances", "settlement_date", "TEXT DEFAULT ''");
 
   addColumn("returns", "adjustment_input", "TEXT NOT NULL DEFAULT ''");
   addColumn("return_items", "discount", "TEXT NOT NULL DEFAULT ''");

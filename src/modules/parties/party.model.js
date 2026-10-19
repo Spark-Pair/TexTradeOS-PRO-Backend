@@ -88,7 +88,9 @@ export const setPartyStatus = (kind, businessId, id, isActive, updatedAt) => {
   return getParty(kind, businessId, id);
 };
 
-export const insertPartyPayment = (values) => db.prepare(`INSERT INTO party_payments (business_id,party_type,party_id,created_by,payment_date,method,amount,reference_no,bank_name,cheque_date,slip_date,notes,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...values);
+export const insertPartyPayment = (values) => db.prepare(`INSERT INTO party_payments (business_id,party_type,party_id,created_by,payment_date,method,amount,reference_no,bank_name,cheque_date,slip_date,notes,bank_account_id,clearing_date,cheque_type,cheque_no,cheque_account_id,source_payment_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...values);
+export const updatePartyPayment = (businessId, id, values) => db.prepare(`UPDATE party_payments SET party_type=?,party_id=?,payment_date=?,method=?,amount=?,reference_no=?,bank_name=?,cheque_date=?,slip_date=?,notes=?,bank_account_id=?,clearing_date=?,cheque_type=?,cheque_no=?,cheque_account_id=?,source_payment_id=?,updated_at=? WHERE business_id=? AND id=?`).run(...values, businessId, id);
+export const deletePartyPayment = (businessId, id) => db.prepare("DELETE FROM party_payments WHERE business_id=? AND id=?").run(businessId, id);
 export const getPartyPayment = (businessId, id) => db.prepare("SELECT * FROM party_payments WHERE business_id=? AND id=?").get(businessId, id);
 
 export const listPayments = (businessId, filters = {}) => {
@@ -97,7 +99,7 @@ export const listPayments = (businessId, filters = {}) => {
   const dateFrom = String(filters.date_from || "").slice(0, 10);
   const dateTo = String(filters.date_to || "").slice(0, 10);
   const rows = [
-    ...db.prepare(`SELECT pp.id,pp.payment_date,pp.method,pp.amount,pp.reference_no,pp.bank_name,pp.cheque_date,pp.slip_date,pp.notes,pp.party_type,pp.party_id,CASE WHEN pp.party_type='customer' THEN c.customer_name ELSE s.supplier_name END party_name,'party' source FROM party_payments pp LEFT JOIN customers c ON c.business_id=pp.business_id AND c.id=pp.party_id AND pp.party_type='customer' LEFT JOIN suppliers s ON s.business_id=pp.business_id AND s.id=pp.party_id AND pp.party_type='supplier' WHERE pp.business_id=?`).all(businessId),
+    ...db.prepare(`SELECT pp.id,pp.payment_date,pp.method,pp.amount,pp.reference_no,pp.bank_name,pp.cheque_date,pp.slip_date,pp.clearing_date,pp.bank_account_id,pp.cheque_type,pp.cheque_no,pp.cheque_account_id,pp.source_payment_id,pp.notes,pp.party_type,pp.party_id,CASE WHEN pp.party_type='customer' THEN c.customer_name ELSE s.supplier_name END party_name,ba.category destination_category,ba.party_id destination_party_id,ba.account_title destination_account_title,ba.bank_name destination_bank_name,ca.account_title cheque_account_title,ca.bank_name cheque_account_bank,'party' source FROM party_payments pp LEFT JOIN customers c ON c.business_id=pp.business_id AND c.id=pp.party_id AND pp.party_type='customer' LEFT JOIN suppliers s ON s.business_id=pp.business_id AND s.id=pp.party_id AND pp.party_type='supplier' LEFT JOIN bank_accounts ba ON ba.business_id=pp.business_id AND ba.id=pp.bank_account_id LEFT JOIN bank_accounts ca ON ca.business_id=pp.business_id AND ca.id=pp.cheque_account_id WHERE pp.business_id=?`).all(businessId),
     ...db.prepare(`SELECT ip.id,ip.payment_date,ip.method,ip.amount,ip.reference_no,ip.bank_name,ip.cheque_date,'' slip_date,ip.notes,'customer' party_type,i.customer_id party_id,i.customer_name party_name,'invoice' source FROM invoice_payments ip JOIN invoices i ON i.id=ip.invoice_id WHERE ip.business_id=?`).all(businessId),
   ];
   return rows

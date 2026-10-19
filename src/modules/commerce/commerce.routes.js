@@ -2,6 +2,7 @@ import express from "express";
 import { createInventoryRouter } from "../inventory/inventory.routes.js";
 import { createPartyRouter } from "../parties/party.routes.js";
 import { createPurchaseRouter } from "../purchases/purchase.routes.js";
+import { createBankAccountRouter } from "../bank-accounts/bank-account.routes.js";
 
 const retiredCompatibilityEndpoints = [
   "/shared-data",
@@ -29,6 +30,7 @@ export function createCommerceRouter(requireAuth) {
   });
 
   router.use(createPartyRouter(requireAuth));
+  router.use(createBankAccountRouter(requireAuth));
   router.use("/purchases", createPurchaseRouter(requireAuth));
   router.use("/inventory", createInventoryRouter(requireAuth));
   return router;

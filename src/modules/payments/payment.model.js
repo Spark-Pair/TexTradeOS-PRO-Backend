@@ -8,6 +8,8 @@ export const PaymentModel = {
     return db.prepare(`INSERT INTO invoice_payments (business_id,invoice_id,created_by,payment_date,method,amount,reference_no,account_name,bank_name,cheque_no,cheque_date,slip_no,transaction_id,notes,metadata,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...values);
   },
   findById(id) { return db.prepare("SELECT * FROM invoice_payments WHERE id=?").get(id); },
+  updateById(businessId, id, values) { return db.prepare("UPDATE invoice_payments SET payment_date=?,method=?,amount=?,reference_no=?,account_name=?,bank_name=?,cheque_no=?,cheque_date=?,slip_no=?,transaction_id=?,notes=?,metadata=?,updated_at=? WHERE business_id=? AND id=?").run(...values, businessId, id); },
+  deleteById(businessId, id) { return db.prepare("DELETE FROM invoice_payments WHERE business_id=? AND id=?").run(businessId, id); },
   total(invoiceId) { return Number(db.prepare("SELECT COALESCE(SUM(amount),0) amount FROM invoice_payments WHERE invoice_id=?").get(invoiceId)?.amount || 0); },
   updateInvoiceTotals(invoiceId, values) {
     return db.prepare("UPDATE invoices SET received_amount=?,balance_amount=?,return_amount=?,payment_status=?,updated_at=? WHERE id=?").run(...values, invoiceId);
