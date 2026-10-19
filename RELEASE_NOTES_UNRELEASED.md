@@ -8,12 +8,14 @@
 - Added a Customized Invoice switch; it defaults to off and selects the default Customer 1 invoice when disabled.
 - Added PNG/SVG logo validation, size limits, and SVG safety checks.
 - Added SparkPair footer credit and contact number to invoices.
+- Added developer-configurable invoice summary fields, zero-value hiding, compact spacing, and single/dual summary boxes.
 
 ## Changed
 
 - Refined Business Profile into the dashboard layout with responsive branding controls and animated invoice toggle.
 - Standardized icon-bearing section-header horizontal spacing across the application.
 - Removed the manual Preview Customer selector; invoice preview and printing now follow the saved Customized Invoice setting.
+- Summary preferences now apply consistently to A4/A5 and Thermal 80mm invoice previews and prints.
 
 ## Verification
 
