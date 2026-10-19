@@ -13,7 +13,7 @@ export const toUserDto = (row) => {
     _id: String(row.id),
     id: String(row.id),
     businessId: row.business_id ? String(row.business_id) : null,
-    business: row.business_id ? { id: String(row.business_id), name: row.business_name || "", person: row.business_person || "", phone: row.business_phone || "", email: row.business_email || "", address: row.business_address || "", urdu_name: row.business_urdu_name || "", tax_number: row.business_tax_number || "", tagline: String(banner?.tagline || ""), logo_data: String(banner?.logo_data || ""), primary_color: /^#[0-9a-f]{6}$/i.test(String(banner?.primary_color || "")) ? String(banner.primary_color) : "#0b74b7", custom_invoice_enabled: banner?.custom_invoice_enabled === true } : null,
+    business: row.business_id ? { id: String(row.business_id), name: row.business_name || "", person: row.business_person || "", phone: row.business_phone || "", email: row.business_email || "", address: row.business_address || "", urdu_name: row.business_urdu_name || "", tax_number: row.business_tax_number || "", tagline: String(banner?.tagline || ""), logo_data: String(banner?.logo_data || ""), primary_color: /^#[0-9a-f]{6}$/i.test(String(banner?.primary_color || "")) ? String(banner.primary_color) : "#0b74b7", custom_invoice_enabled: banner?.custom_invoice_enabled === true, summary_settings: banner?.summary_settings && typeof banner.summary_settings === "object" ? banner.summary_settings : {} } : null,
     business_name: row.business_name || "",
     name: row.name,
     username: row.username,
