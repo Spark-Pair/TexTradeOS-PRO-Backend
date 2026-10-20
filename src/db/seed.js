@@ -4,20 +4,24 @@ import { defaultReferenceData, defaultRuleData } from "../config/business-defaul
 
 const now = () => new Date().toISOString();
 
-export const seedFreshDatabase = () => {
+export const seedDefaultUsers = () => {
   db.transaction(() => {
     const createdAt = now();
-    const business = db.prepare(`
-      INSERT INTO businesses (
-        name, person, price, registration_date, is_active, reference_data, rule_data,
-        invoice_banner_data, machine_options, invoice_counter_year, invoice_counter_last, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      "", "", 0, createdAt, 1,
-      JSON.stringify(defaultReferenceData()), JSON.stringify(defaultRuleData()),
-      "", "[]", new Date().getFullYear(), 0, createdAt, createdAt
-    );
-    const businessId = Number(business.lastInsertRowid);
+    let business = db.prepare("SELECT id FROM businesses ORDER BY id LIMIT 1").get();
+    if (!business) {
+      const result = db.prepare(`
+        INSERT INTO businesses (
+          name, person, price, registration_date, is_active, reference_data, rule_data,
+          invoice_banner_data, machine_options, invoice_counter_year, invoice_counter_last, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "", "", 0, createdAt, 1,
+        JSON.stringify(defaultReferenceData()), JSON.stringify(defaultRuleData()),
+        "", "[]", new Date().getFullYear(), 0, createdAt, createdAt
+      );
+      business = { id: Number(result.lastInsertRowid) };
+    }
+    const businessId = Number(business.id);
     const insertUser = db.prepare(`
       INSERT INTO users (business_id, name, username, password_hash, role, is_active, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, 1, ?, ?)
@@ -25,8 +29,13 @@ export const seedFreshDatabase = () => {
     [
       { name: "Developer", username: "dev", password: "dev@SparkPair", role: "developer" },
       { name: "Admin", username: "admin", password: "admin123", role: "admin" },
-    ].forEach((user) => insertUser.run(
-      businessId, user.name, user.username, bcrypt.hashSync(user.password, 10), user.role, createdAt, createdAt
-    ));
+    ].forEach((user) => {
+      const exists = db.prepare("SELECT id FROM users WHERE username = ? LIMIT 1").get(user.username);
+      if (!exists) {
+        insertUser.run(
+          businessId, user.name, user.username, bcrypt.hashSync(user.password, 10), user.role, createdAt, createdAt
+        );
+      }
+    });
   }).immediate();
 };
