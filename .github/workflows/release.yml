@@ -22,6 +22,11 @@ on:
         required: true
         default: 1.0.0
         type: string
+      launcher_update_required:
+        description: Replace the installed launcher because launcher code changed
+        required: true
+        default: false
+        type: boolean
       notes:
         description: Release notes shown inside TexTradeOS
         required: false
@@ -161,6 +166,7 @@ jobs:
           RELEASE_URL: https://github.com/${{ github.repository }}/releases/tag/v${{ inputs.version }}
           RELEASE_NOTES: ${{ inputs.notes }}
           MINIMUM_LAUNCHER_VERSION: ${{ inputs.minimum_launcher_version }}
+          LAUNCHER_UPDATE_REQUIRED: ${{ inputs.launcher_update_required }}
           FRONTEND_IMAGE: ghcr.io/spark-pair/textradeos-frontend@${{ needs.images.outputs.frontend_digest }}
           BACKEND_IMAGE: ghcr.io/spark-pair/textradeos-backend@${{ needs.images.outputs.backend_digest }}
           FRONTEND_COMMIT: ${{ needs.images.outputs.frontend_commit }}

@@ -39,6 +39,8 @@ and `update.json`.
    - `mandatory`: `false` for normal updates or `true` for required updates
    - `minimum_launcher_version`: normally the currently supported launcher;
      use the new version when launcher code changed
+   - `launcher_update_required`: set `true` when launcher code changed so the
+     installed launcher is replaced automatically after the container update
    - `notes`: concise customer-facing release notes
 7. Run the workflow from the backend commit that should be released.
 8. Wait for all three jobs to succeed.
@@ -61,7 +63,10 @@ approves the update, the launcher:
 2. Creates a consistent SQLite backup.
 3. Stops the existing containers.
 4. Starts the new release and waits for health checks.
-5. Restores the old images and database automatically if installation fails.
+5. The new backend runs its schema migrations and default-user seeder before
+   becoming healthy; no demo data is seeded.
+6. Replaces the Windows launcher when `launcher_update_required` is enabled.
+7. Restores the old images and database automatically if installation fails.
 
 Optional updates can be deferred per version. Mandatory updates block normal
 application API use until the launcher installs the release.

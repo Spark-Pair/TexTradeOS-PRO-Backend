@@ -32,6 +32,9 @@ const validateMetadata = (value) => {
     typeof value.frontendImage !== "string" ||
     typeof value.backendImage !== "string"
   ) throw new Error("Update metadata is invalid");
+  if ("launcherUpdateRequired" in value && typeof value.launcherUpdateRequired !== "boolean") {
+    throw new Error("Update metadata is invalid");
+  }
   if (
     !value.releaseUrl.startsWith("https://github.com/Spark-Pair/") ||
     !value.frontendImage.startsWith("ghcr.io/spark-pair/textradeos-frontend@sha256:") ||
@@ -40,7 +43,9 @@ const validateMetadata = (value) => {
   return {
     schemaVersion: Number(value.schemaVersion || 1), version: value.version, mandatory: value.mandatory,
     publishedAt: value.publishedAt || null, releaseUrl: value.releaseUrl, notes: String(value.notes || ""),
-    minimumLauncherVersion: String(value.minimumLauncherVersion || "0.0.0"), frontendImage: value.frontendImage, backendImage: value.backendImage,
+    minimumLauncherVersion: String(value.minimumLauncherVersion || "0.0.0"),
+    launcherUpdateRequired: value.launcherUpdateRequired === true,
+    frontendImage: value.frontendImage, backendImage: value.backendImage,
   };
 };
 

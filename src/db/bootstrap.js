@@ -9,9 +9,11 @@ let initialized = false;
 export const initializeDatabase = () => {
   if (initialized) return;
   ensureCoreSchema();
+  ensureCommerceSchemaV2();
+  // Runs on every backend start, including the successful start after an update.
+  // It only ensures the default users/business exist; it does not insert demo data.
   seedDefaultUsers();
   ensureDefaultDeveloperAccount();
-  ensureCommerceSchemaV2();
   backfillBusinessAccessRules();
   initialized = true;
 };

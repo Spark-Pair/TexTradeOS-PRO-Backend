@@ -19,6 +19,7 @@ const metadata = {
   releaseUrl: process.env.RELEASE_URL,
   notes: process.env.RELEASE_NOTES || "",
   minimumLauncherVersion: process.env.MINIMUM_LAUNCHER_VERSION || "1.0.0",
+  launcherUpdateRequired: process.env.LAUNCHER_UPDATE_REQUIRED === "true",
   launcherSetupUrl:
     process.env.LAUNCHER_SETUP_URL ||
     `https://github.com/Spark-Pair/TexTradeOS-PRO-Backend/releases/download/v${process.env.VERSION}/TexTradeOS-PRO-Setup-${process.env.VERSION}.exe`,

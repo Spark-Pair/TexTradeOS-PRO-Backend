@@ -290,7 +290,7 @@ MANAGEMENT_SECRET={managementSecret}
         if (!IsTrusted(update)) throw new InvalidOperationException("Update metadata is not trusted.");
         var launcherVersion = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(1, 0, 0);
         if (Version.TryParse(update.MinimumLauncherVersion, out var minimumLauncher) &&
-            launcherVersion < minimumLauncher)
+            launcherVersion < minimumLauncher && update.LauncherUpdateRequired != true)
         {
             throw new InvalidOperationException(
                 $"This release requires launcher {minimumLauncher} or newer. Install the new TexTradeOS setup package from the release page.");
@@ -562,8 +562,10 @@ MANAGEMENT_SECRET={managementSecret}
         try
         {
             var launcherVersion = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(0, 0, 0);
-            if (!Version.TryParse(update.Version, out var updateVersion) || launcherVersion >= updateVersion)
+            if (!Version.TryParse(update.Version, out var updateVersion))
                 return false;
+            var launcherUpdateRequired = update.LauncherUpdateRequired ?? launcherVersion < updateVersion;
+            if (!launcherUpdateRequired) return false;
 
             var setupUrl = string.IsNullOrWhiteSpace(update.LauncherSetupUrl)
                 ? BuildLauncherSetupUrl(update)
@@ -703,7 +705,10 @@ MANAGEMENT_SECRET={managementSecret}
     private static void PruneBackups()
     {
         foreach (var file in new DirectoryInfo(BackupDirectory)
-                     .GetFiles("*.sqlite")
+                     .GetFiles("textradeos-*.sqlite")
+                     .Where(file => System.Text.RegularExpressions.Regex.IsMatch(
+                         file.Name, "^textradeos-\\d{8}-\\d{6}\\.sqlite$",
+                         System.Text.RegularExpressions.RegexOptions.IgnoreCase))
                      .OrderByDescending(file => file.CreationTimeUtc)
                      .Skip(10))
             file.Delete();
