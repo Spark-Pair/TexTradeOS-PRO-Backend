@@ -4,7 +4,7 @@ import { getArticleUsage, getPurchase, getPurchaseItems, listPurchases, removePu
 
 const text = (value) => String(value || "").trim();
 const number = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
-const itemDto = (row) => ({ article_no: row.article_no, qr_id: row.qr_id, description: row.description || "", size: row.size || "", season: row.season || "", category: row.category || "", unit: number(row.unit), quantity_dzn: number(row.quantity_dzn), quantity_pcs: number(row.quantity_pcs), quantity_pkt: number(row.quantity_pkt), rate: number(row.rate), sale_rate: number(row.sale_rate), discount: row.discount || "", discount_amount: number(row.discount_amount), amount: number(row.amount) });
+const itemDto = (row) => ({ _id: row.id, article_no: row.article_no, qr_id: row.qr_id, description: row.description || "", size: row.size || "", season: row.season || "", category: row.category || "", unit: number(row.unit), quantity_dzn: number(row.quantity_dzn), quantity_pcs: number(row.quantity_pcs), quantity_pkt: number(row.quantity_pkt), rate: number(row.rate), sale_rate: number(row.sale_rate), discount: row.discount || "", discount_amount: number(row.discount_amount), amount: number(row.amount) });
 const dto = (row) => row ? ({ _id: row.id, purchase_number: row.purchase_number, purchase_date: row.purchase_date, supplier_id: row.supplier_id || "", supplier_name: row.supplier_name, notes: row.notes || "", total_amount: number(row.total_amount), article_count: number(row.article_count), packet_count: number(row.packet_count), createdAt: row.created_at, updatedAt: row.updated_at, articles: getPurchaseItems(row.id).map(itemDto) }) : null;
 
 export const listPurchaseDtos = (businessId) => listPurchases(businessId).map(dto);

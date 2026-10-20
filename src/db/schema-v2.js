@@ -4,6 +4,48 @@ import { migrateSharedCommerceData } from "./migrate-shared-commerce.js";
 const hasColumn = (table, column) => db.prepare(`PRAGMA table_info(${table})`).all().some((row) => row.name === column);
 const addColumn = (table, column, definition) => { if (!hasColumn(table, column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); };
 
+const allowDuplicatePurchaseArticleNumbers = () => {
+  const definition = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'purchase_items'").get()?.sql || "";
+  if (!definition.replace(/\s/g, "").toLowerCase().includes("unique(purchase_id,article_no)")) return;
+  db.transaction(() => {
+    db.exec("ALTER TABLE purchase_items RENAME TO purchase_items_legacy");
+    db.exec("DROP INDEX IF EXISTS idx_purchase_items_purchase; DROP INDEX IF EXISTS idx_purchase_items_article;");
+    db.exec(`
+      CREATE TABLE purchase_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        purchase_id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        article_no TEXT NOT NULL,
+        qr_id TEXT NOT NULL,
+        description TEXT DEFAULT NULL,
+        size TEXT DEFAULT '',
+        season TEXT DEFAULT '',
+        category TEXT DEFAULT '',
+        unit REAL NOT NULL DEFAULT 0,
+        quantity_dzn REAL NOT NULL DEFAULT 0,
+        quantity_pcs REAL NOT NULL DEFAULT 0,
+        quantity_pkt REAL NOT NULL DEFAULT 0,
+        rate REAL NOT NULL DEFAULT 0,
+        sale_rate REAL NOT NULL DEFAULT 0,
+        discount TEXT DEFAULT '',
+        discount_amount REAL NOT NULL DEFAULT 0,
+        amount REAL NOT NULL DEFAULT 0,
+        FOREIGN KEY (purchase_id) REFERENCES purchases(id) ON DELETE CASCADE
+      );
+      INSERT INTO purchase_items (
+        id,purchase_id,position,article_no,qr_id,description,size,season,category,unit,
+        quantity_dzn,quantity_pcs,quantity_pkt,rate,sale_rate,discount,discount_amount,amount
+      ) SELECT
+        id,purchase_id,position,article_no,qr_id,description,size,season,category,unit,
+        quantity_dzn,quantity_pcs,quantity_pkt,rate,sale_rate,discount,discount_amount,amount
+      FROM purchase_items_legacy;
+      DROP TABLE purchase_items_legacy;
+      CREATE INDEX IF NOT EXISTS idx_purchase_items_purchase ON purchase_items(purchase_id, position);
+      CREATE INDEX IF NOT EXISTS idx_purchase_items_article ON purchase_items(article_no);
+    `);
+  }).immediate();
+};
+
 export function ensureCommerceSchemaV2() {
   addColumn("invoices", "customer_id", "TEXT");
   addColumn("invoices", "customer_kind", "TEXT NOT NULL DEFAULT 'registered'");
@@ -14,7 +56,7 @@ export function ensureCommerceSchemaV2() {
     CREATE TABLE IF NOT EXISTS suppliers (id TEXT PRIMARY KEY,business_id INTEGER NOT NULL,supplier_name TEXT NOT NULL,person_name TEXT DEFAULT '',urdu_title TEXT DEFAULT '',phone_number TEXT DEFAULT '',address TEXT DEFAULT '',city TEXT DEFAULT '',is_active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE);
     CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY,business_id INTEGER NOT NULL,customer_name TEXT NOT NULL,person_name TEXT DEFAULT '',urdu_title TEXT DEFAULT '',phone_number TEXT DEFAULT '',address TEXT DEFAULT '',city TEXT DEFAULT '',is_active INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE);
     CREATE TABLE IF NOT EXISTS purchases (id TEXT PRIMARY KEY,business_id INTEGER NOT NULL,created_by INTEGER,purchase_number TEXT NOT NULL,purchase_date TEXT NOT NULL,supplier_id TEXT,supplier_name TEXT NOT NULL,notes TEXT DEFAULT '',total_amount REAL NOT NULL DEFAULT 0,article_count INTEGER NOT NULL DEFAULT 0,packet_count REAL NOT NULL DEFAULT 0,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(business_id, purchase_number),FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL);
-    CREATE TABLE IF NOT EXISTS purchase_items (id INTEGER PRIMARY KEY AUTOINCREMENT,purchase_id TEXT NOT NULL,position INTEGER NOT NULL,article_no TEXT NOT NULL,qr_id TEXT NOT NULL,description TEXT DEFAULT NULL,size TEXT DEFAULT '',season TEXT DEFAULT '',category TEXT DEFAULT '',unit REAL NOT NULL DEFAULT 0,quantity_dzn REAL NOT NULL DEFAULT 0,quantity_pcs REAL NOT NULL DEFAULT 0,quantity_pkt REAL NOT NULL DEFAULT 0,rate REAL NOT NULL DEFAULT 0,sale_rate REAL NOT NULL DEFAULT 0,discount TEXT DEFAULT '',discount_amount REAL NOT NULL DEFAULT 0,amount REAL NOT NULL DEFAULT 0,FOREIGN KEY (purchase_id) REFERENCES purchases(id) ON DELETE CASCADE,UNIQUE(purchase_id, article_no));
+    CREATE TABLE IF NOT EXISTS purchase_items (id INTEGER PRIMARY KEY AUTOINCREMENT,purchase_id TEXT NOT NULL,position INTEGER NOT NULL,article_no TEXT NOT NULL,qr_id TEXT NOT NULL,description TEXT DEFAULT NULL,size TEXT DEFAULT '',season TEXT DEFAULT '',category TEXT DEFAULT '',unit REAL NOT NULL DEFAULT 0,quantity_dzn REAL NOT NULL DEFAULT 0,quantity_pcs REAL NOT NULL DEFAULT 0,quantity_pkt REAL NOT NULL DEFAULT 0,rate REAL NOT NULL DEFAULT 0,sale_rate REAL NOT NULL DEFAULT 0,discount TEXT DEFAULT '',discount_amount REAL NOT NULL DEFAULT 0,amount REAL NOT NULL DEFAULT 0,FOREIGN KEY (purchase_id) REFERENCES purchases(id) ON DELETE CASCADE);
     CREATE TABLE IF NOT EXISTS commerce_counters (business_id INTEGER NOT NULL,counter_key TEXT NOT NULL,value INTEGER NOT NULL DEFAULT 0,PRIMARY KEY (business_id, counter_key),FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE);
     CREATE TABLE IF NOT EXISTS returns (id INTEGER PRIMARY KEY AUTOINCREMENT,business_id INTEGER NOT NULL,created_by INTEGER,return_number TEXT NOT NULL,return_type TEXT NOT NULL CHECK(return_type IN ('sales','purchase')),return_date TEXT NOT NULL,party_id TEXT,party_name TEXT NOT NULL,linked_invoice_id INTEGER,linked_purchase_id TEXT,stock_action TEXT NOT NULL DEFAULT 'return_stock' CHECK(stock_action IN ('return_stock','keep_goods')),adjustment_type TEXT NOT NULL DEFAULT 'none',adjustment_value REAL NOT NULL DEFAULT 0,gross_amount REAL NOT NULL DEFAULT 0,adjustment_amount REAL NOT NULL DEFAULT 0,total_amount REAL NOT NULL DEFAULT 0,total_pcs REAL NOT NULL DEFAULT 0,notes TEXT DEFAULT '',created_at TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(business_id, return_type, return_number),FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,FOREIGN KEY (linked_invoice_id) REFERENCES invoices(id) ON DELETE SET NULL);
     CREATE TABLE IF NOT EXISTS return_items (id INTEGER PRIMARY KEY AUTOINCREMENT,return_id INTEGER NOT NULL,position INTEGER NOT NULL,article_no TEXT NOT NULL,purchase_number TEXT DEFAULT '',qr_id TEXT DEFAULT '',source_document_id TEXT DEFAULT '',description TEXT DEFAULT '',pcs REAL NOT NULL,rate REAL NOT NULL DEFAULT 0,gross_amount REAL NOT NULL DEFAULT 0,amount REAL NOT NULL DEFAULT 0,FOREIGN KEY (return_id) REFERENCES returns(id) ON DELETE CASCADE);
@@ -56,5 +98,6 @@ export function ensureCommerceSchemaV2() {
   addColumn("return_items", "discount_type", "TEXT NOT NULL DEFAULT ''");
   addColumn("return_items", "discount_amount", "REAL NOT NULL DEFAULT 0");
 
+  allowDuplicatePurchaseArticleNumbers();
   migrateSharedCommerceData();
 }

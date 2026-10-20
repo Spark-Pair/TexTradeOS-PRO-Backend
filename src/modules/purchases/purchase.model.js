@@ -26,19 +26,6 @@ const reserveCounter = (businessId, key, count, floor) => {
   return { first: base + 1, last: next };
 };
 
-const assertUniqueArticleNumbers = (businessId, purchaseId, items) => {
-  const seen = new Set();
-  const findExisting = db.prepare(`SELECT p.purchase_number FROM purchase_items pi JOIN purchases p ON p.id = pi.purchase_id WHERE p.business_id = ? AND pi.article_no = ? AND p.id <> ? LIMIT 1`);
-  for (const item of items) {
-    const articleNo = String(item.article_no || "").trim();
-    if (!articleNo) continue;
-    if (seen.has(articleNo)) throw Object.assign(new Error(`Article number ${articleNo} is duplicated in this purchase`), { statusCode: 409 });
-    seen.add(articleNo);
-    const existing = findExisting.get(businessId, articleNo, purchaseId);
-    if (existing) throw Object.assign(new Error(`Article number ${articleNo} already exists in purchase ${existing.purchase_number}`), { statusCode: 409 });
-  }
-};
-
 export const savePurchaseRecord = (businessId, userId, purchase, items, { allocateNumbers = false, year } = {}) => db.transaction(() => {
   let purchaseNumber = purchase.purchase_number;
   let normalizedItems = items;
@@ -49,7 +36,6 @@ export const savePurchaseRecord = (businessId, userId, purchase, items, { alloca
     let articleSeq = missingCount ? reserveCounter(businessId, "article", missingCount, currentArticleSequence(businessId)).first : 0;
     normalizedItems = items.map((item) => item.article_no ? item : { ...item, article_no: `ART-${String(articleSeq++).padStart(5, "0")}` });
   }
-  assertUniqueArticleNumbers(businessId, purchase.id, normalizedItems);
   db.prepare(`INSERT INTO purchases (id,business_id,created_by,purchase_number,purchase_date,supplier_id,supplier_name,notes,total_amount,article_count,packet_count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET purchase_date=excluded.purchase_date,supplier_id=excluded.supplier_id,supplier_name=excluded.supplier_name,notes=excluded.notes,total_amount=excluded.total_amount,article_count=excluded.article_count,packet_count=excluded.packet_count,updated_at=excluded.updated_at`).run(purchase.id,businessId,userId,purchaseNumber,purchase.purchase_date,purchase.supplier_id,purchase.supplier_name,purchase.notes,purchase.total_amount,normalizedItems.length,purchase.packet_count,purchase.created_at,purchase.updated_at);
   db.prepare("DELETE FROM purchase_items WHERE purchase_id = ?").run(purchase.id);
   const insert = db.prepare(`INSERT INTO purchase_items (purchase_id,position,article_no,qr_id,description,size,season,category,unit,quantity_dzn,quantity_pcs,quantity_pkt,rate,sale_rate,discount,discount_amount,amount) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
