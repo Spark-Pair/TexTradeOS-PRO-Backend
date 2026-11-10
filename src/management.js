@@ -8,7 +8,7 @@ import { v4 as uuidv4 } from "uuid";
 const dataDirectory = path.dirname(path.resolve(process.env.DATABASE_PATH || "./textradeos.sqlite"));
 const commandDirectory = path.join(dataDirectory, "launcher-commands");
 const resultDirectory = path.join(dataDirectory, "launcher-results");
-const backupDirectory = path.resolve(process.env.BACKUP_PATH || "/backups");
+const backupDirectory = path.resolve(process.env.BACKUP_PATH || "./backups");
 const restoreUploadDirectory = path.join(dataDirectory, "restore-uploads");
 const managementSecret = String(process.env.MANAGEMENT_SECRET || "");
 const databasePath = path.resolve(process.env.DATABASE_PATH || "./textradeos.sqlite");
