@@ -14,6 +14,7 @@ export const UserController = {
   listBusiness: (req, res) => send(res, () => UserService.listBusiness(req.user.business_id, req.query)),
   businessStats: (req, res) => send(res, () => UserService.businessStats(req.user.business_id)),
   createBusiness: (req, res) => send(res, () => UserService.createBusinessUser(req.user.business_id, req.body), 201),
+  updateBusiness: (req, res) => send(res, () => UserService.updateBusinessUser(req.user.business_id, req.params.id, req.body)),
   toggleBusiness: (req, res) => send(res, () => UserService.toggleStatus(req.params.id, req.user.business_id)),
   toggleAny: (req, res) => send(res, () => UserService.toggleStatus(req.params.id)),
   resetBusinessPassword: (req, res) => send(res, () => UserService.resetPassword(req.params.id, req.body?.newPassword, req.user.business_id)),

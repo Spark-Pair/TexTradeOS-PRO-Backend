@@ -10,6 +10,7 @@ export const UserModel = {
   statusRows(businessId = null) { return businessId === null ? db.prepare("SELECT is_active FROM users").all() : db.prepare("SELECT is_active FROM users WHERE business_id = ? AND role <> 'developer'").all(businessId); },
   findManaged(id, businessId = null) { return businessId === null ? db.prepare("SELECT * FROM users WHERE id = ?").get(id) : db.prepare("SELECT * FROM users WHERE id = ? AND business_id = ? AND role <> 'developer'").get(id, businessId); },
   create({ businessId, name, username, passwordHash, role, timestamp }) { return db.prepare("INSERT INTO users (business_id, name, username, password_hash, role, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)").run(businessId, name, username, passwordHash, role, timestamp, timestamp); },
+  updateBusinessProfile(id, businessId, name, username, role, timestamp) { return db.prepare("UPDATE users SET name=?,username=?,role=?,updated_at=? WHERE id=? AND business_id=? AND role <> 'developer'").run(name, username, role, timestamp, id, businessId); },
   toggleStatus(id, isActive, timestamp) { return db.prepare("UPDATE users SET is_active = ?, updated_at = ? WHERE id = ?").run(isActive, timestamp, id); },
   updatePassword(id, passwordHash, timestamp) { return db.prepare("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?").run(passwordHash, timestamp, id); },
   updateShortcuts(id, shortcuts, updatedAt) { return db.prepare("UPDATE users SET shortcuts = ?, updated_at = ? WHERE id = ?").run(JSON.stringify(shortcuts), updatedAt, id); },

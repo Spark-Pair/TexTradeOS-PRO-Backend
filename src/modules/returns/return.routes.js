@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { ReturnController } from "./return.controller.js";
+import { requireBusinessAdmin } from "../../middleware/auth.middleware.js";
 
 export function createReturnRouter(requireAuth) {
   const router=Router();
@@ -8,6 +9,7 @@ export function createReturnRouter(requireAuth) {
   router.get("/:type",ReturnController.list);
   router.get("/:type/:id",ReturnController.get);
   router.post("/:type",ReturnController.create);
+  router.put("/:type/:id",requireBusinessAdmin,ReturnController.update);
   router.delete("/:type/:id",ReturnController.delete);
   return router;
 }

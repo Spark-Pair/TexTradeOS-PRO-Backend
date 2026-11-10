@@ -10,6 +10,7 @@ router.get("/stats", requireDeveloper, UserController.allStats);
 router.get("/business", UserController.listBusiness);
 router.get("/business/stats", UserController.businessStats);
 router.post("/business", requireBusinessAdmin, UserController.createBusiness);
+router.put("/business/:id", requireBusinessAdmin, UserController.updateBusiness);
 router.patch("/business/:id/toggle-status", requireBusinessAdmin, UserController.toggleBusiness);
 router.patch("/:id/toggle-status", requireDeveloper, UserController.toggleAny);
 router.patch("/business/:id/reset-password", requireBusinessAdmin, UserController.resetBusinessPassword);

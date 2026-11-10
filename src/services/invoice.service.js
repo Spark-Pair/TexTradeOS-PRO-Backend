@@ -9,3 +9,42 @@ const fail=(status,message)=>Object.assign(new Error(message),{status});const ti
 const paymentDto=(row)=>row?{id:String(row.id),payment_date:row.payment_date||"",method:row.method||"",amount:Number(row.amount||0),reference_no:row.reference_no||"",account_name:row.account_name||"",bank_name:row.bank_name||"",cheque_no:row.cheque_no||"",cheque_date:row.cheque_date||"",slip_no:row.slip_no||"",transaction_id:row.transaction_id||"",notes:row.notes||""}:null;
 const invoiceDtoWithReturn=(invoice,articles,businessId,balances={})=>{const dto=toInvoiceDto(invoice,articles);const summary=ReturnModel.invoiceSalesReturnSummary(businessId,invoice.id);const totalAmount=Number(summary?.total_amount||invoice.sales_return_amount||0),totalPcs=Number(summary?.total_pcs||0);const payments=listInvoicePayments(businessId,invoice.id).map(paymentDto);return{...dto,sales_return_amount:totalAmount,sales_return:{total_amount:totalAmount,total_pcs:totalPcs},payment:payments.at(-1)||null,payments,customer_balance_before:Number(balances.before??dto.customer_balance_before??0),customer_balance_after:Number(balances.after??dto.customer_balance_after??0)};};
 export const InvoiceService={list(businessId,query){return paginate(InvoiceModel.list(businessId,{customerName:String(query.customer_name||"").trim(),dateFrom:String(query.date_from||"").trim(),dateTo:String(query.date_to||"").trim()}),query);},get(id,businessId){const invoice=InvoiceModel.find(id,businessId);if(!invoice)throw fail(404,"Invoice not found");return{success:true,data:invoiceDtoWithReturn(invoice,InvoiceModel.items(invoice.id).map(itemDto),businessId)};},create(user,body={}){const customerName=titleCase(body.customer_name),invoiceDate=String(body.invoice_date||new Date().toISOString().slice(0,10)),articles=Array.isArray(body.articles)?body.articles:[];if(!customerName)throw fail(400,"Customer name is required");if(!articles.length)throw fail(400,"At least one article is required");const year=new Date(`${invoiceDate}T00:00:00`).getFullYear();if(!Number.isFinite(year))throw fail(400,"Invalid invoice date");const transaction=InvoiceModel.transaction(()=>{const counter=InvoiceModel.counterLast(user.business_id,year),business=InvoiceModel.businessCounter(user.business_id),configuredLast=Number(business?.invoice_counter_year)===year?Number(business.invoice_counter_last||0):0,nextNo=Math.max(Number(counter?.last_no||0),configuredLast)+1,invoiceNumber=`${year}-${String(nextNo).padStart(4,"0")}`,customerId=String(body.customer_id||"").trim();const previousBalance=customerId?Number(getPartyBalance("customers",user.business_id,customerId).balance||0):0;let normalized=articles.map(normalizeItem),articleNumbers=InvoiceModel.reserveArticleNumbers(user.business_id,normalized.filter(article=>!article.article_no).length);normalized=normalized.map(article=>article.article_no?article:{...article,article_no:articleNumbers.shift()});const calculated=totals(normalized,body.sales_return_amount,body.received_amount),timestamp=now();const result=InvoiceModel.insert([user.business_id,user.id,invoiceNumber,invoiceDate,customerName,String(body.customer_urdu_title||"").trim(),titleCase(body.salesman_name),String(body.customer_phone||"").trim(),String(body.customer_address||"").trim(),calculated.gross_amount,calculated.percent_discount_amount,calculated.rupee_discount_amount,calculated.total_discount_amount,calculated.net_amount,calculated.sales_return_amount,calculated.received_amount,calculated.balance_amount,calculated.return_amount,calculated.total_amount,customerId||null,body.customer_kind==="walk_in"?"walk_in":"registered",String(body.walk_in_person||"").trim(),"unpaid",timestamp,timestamp]);const invoiceId=Number(result.lastInsertRowid);InvoiceModel.insertItems(invoiceId,normalized);let linkedReturnAmount=0;if(body.sales_return&&Array.isArray(body.sales_return.articles)&&body.sales_return.articles.length){const record=createReturn({businessId:user.business_id,userId:user.id,type:"sales",body:{...body.sales_return,return_date:body.sales_return.return_date||invoiceDate,party_id:customerId,party_name:customerName,linked_invoice_id:invoiceId}});linkedReturnAmount=Number(record.total_amount||0);InvoiceModel.setSalesReturnAmount(invoiceId,linkedReturnAmount);}if(body.payment&&Number(body.payment.amount||0)>0)addInvoicePayment({businessId:user.business_id,userId:user.id,invoiceId,payment:body.payment});InvoiceModel.updateCounter(user.business_id,year,nextNo,timestamp);const currentBalance=previousBalance+(customerId?Number(calculated.net_amount||0)-Number(body.received_amount||0)-linkedReturnAmount:0);return invoiceDtoWithReturn(InvoiceModel.findAny(invoiceId),normalized.map((article,index)=>({...article,_id:String(index+1)})),user.business_id,{before:previousBalance,after:currentBalance});});return{success:true,data:transaction.immediate()};},delete(id,user){if(!["developer","admin"].includes(user.role))throw fail(403,"Admin access required");const invoice=user.role==="developer"?InvoiceModel.findAny(id):InvoiceModel.find(id,user.business_id);if(!invoice)throw fail(404,"Invoice not found");InvoiceModel.delete(invoice.id);return{success:true};}};
+
+InvoiceService.update = (id, user, body = {}) => {
+  if (user.role !== "admin" && user.role !== "developer") throw fail(403, "Admin access required");
+  const existing = InvoiceModel.find(id, user.business_id);
+  if (!existing) throw fail(404, "Invoice not found");
+  const customerName = titleCase(body.customer_name);
+  const invoiceDate = String(body.invoice_date || existing.invoice_date);
+  const customerId = String(body.customer_id || "").trim();
+  const articles = Array.isArray(body.articles) ? body.articles : [];
+  if (!customerName) throw fail(400, "Customer name is required");
+  if (!articles.length) throw fail(400, "At least one article is required");
+  if (!Number.isFinite(new Date(`${invoiceDate}T00:00:00`).getTime())) throw fail(400, "Invalid invoice date");
+
+  const transaction = InvoiceModel.transaction(() => {
+    const linkedReturn = ReturnModel.invoiceSalesReturnSummary(user.business_id, id);
+    const returnAmount = Number(linkedReturn?.total_amount || existing.sales_return_amount || 0);
+    const linkedReturns = ReturnModel.linkedSalesReturnQuantities(user.business_id, id);
+    if (linkedReturns.length && (customerId !== String(existing.customer_id || "") || invoiceDate !== existing.invoice_date))
+      throw fail(409, "Customer and date cannot be changed while this invoice has linked sales returns.");
+
+    let normalized = articles.map(normalizeItem);
+    const articleNumbers = InvoiceModel.reserveArticleNumbers(user.business_id, normalized.filter((article) => !article.article_no).length);
+    normalized = normalized.map((article) => article.article_no ? article : { ...article, article_no: articleNumbers.shift() });
+    for (const returned of linkedReturns) {
+      const sold = normalized.filter((article) => article.article_no === returned.article_no && article.purchase_number === returned.purchase_number).reduce((sum, article) => sum + article.pcs, 0);
+      if (sold < Number(returned.pcs)) throw fail(409, `${returned.article_no}: edited quantity cannot be less than the quantity already returned.`);
+    }
+
+    const received = Math.max(Number(existing.received_amount || 0), listInvoicePayments(user.business_id, id).reduce((sum, payment) => sum + Number(payment.amount || 0), 0));
+    const calculated = totals(normalized, returnAmount, received);
+    const timestamp = now();
+    const status = received <= 0 ? "unpaid" : received < calculated.total_amount ? "partial" : "paid";
+    InvoiceModel.update(id, [invoiceDate, customerName, String(body.customer_urdu_title || "").trim(), titleCase(body.salesman_name), String(body.customer_phone || "").trim(), String(body.customer_address || "").trim(), calculated.gross_amount, calculated.percent_discount_amount, calculated.rupee_discount_amount, calculated.total_discount_amount, calculated.net_amount, returnAmount, received, calculated.balance_amount, calculated.return_amount, calculated.total_amount, customerId || null, body.customer_kind === "walk_in" ? "walk_in" : "registered", String(body.walk_in_person || "").trim(), status, timestamp]);
+    InvoiceModel.replaceItems(id, normalized);
+    const updated = InvoiceModel.find(id, user.business_id);
+    return invoiceDtoWithReturn(updated, InvoiceModel.items(id).map(itemDto), user.business_id);
+  });
+  return { success: true, data: transaction.immediate() };
+};

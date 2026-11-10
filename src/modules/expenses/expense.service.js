@@ -43,6 +43,19 @@ export function createExpense({ businessId, userId, body = {} }) {
   return toDto(ExpenseModel.find(businessId, result.lastInsertRowid));
 }
 
+export function updateExpense({ businessId, id, body = {} }) {
+  const existing = ExpenseModel.find(businessId, id);
+  if (!existing) throw Object.assign(new Error("Expense not found"), { status: 404 });
+  const category = text(body.category);
+  const amount = num(body.amount);
+  const method = text(body.method).toLowerCase();
+  if (!category) throw Object.assign(new Error("Expense category is required"), { status: 400 });
+  if (!methods.has(method)) throw Object.assign(new Error("Invalid payment method"), { status: 400 });
+  if (amount <= 0) throw Object.assign(new Error("Expense amount must be greater than zero"), { status: 400 });
+  ExpenseModel.update(businessId, id, [text(body.expense_date) || existing.expense_date, category, text(body.paid_to), method, amount, method === "cash" ? "" : text(body.reference_no), method === "cheque" ? text(body.bank_name) : "", method === "cheque" ? text(body.cheque_date) : "", method === "slip" ? text(body.slip_date) : "", text(body.notes), now()]);
+  return toDto(ExpenseModel.find(businessId, id));
+}
+
 export function deleteExpense(businessId, id) {
   const existing = ExpenseModel.find(businessId, id);
   if (!existing) throw Object.assign(new Error("Expense not found"), { status: 404 });

@@ -10,6 +10,9 @@ export const ExpenseModel = {
   find(businessId, id) {
     return db.prepare("SELECT * FROM expenses WHERE business_id=? AND id=?").get(businessId, id);
   },
+  update(businessId, id, values) {
+    return db.prepare("UPDATE expenses SET expense_date=?,category=?,paid_to=?,method=?,amount=?,reference_no=?,bank_name=?,cheque_date=?,slip_date=?,notes=?,updated_at=? WHERE business_id=? AND id=?").run(...values, businessId, id);
+  },
   delete(businessId, id) {
     return db.prepare("DELETE FROM expenses WHERE business_id=? AND id=?").run(businessId, id);
   },

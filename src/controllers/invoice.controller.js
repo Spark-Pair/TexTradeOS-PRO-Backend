@@ -11,5 +11,6 @@ export const InvoiceController = {
   sharedLedger: (req, res) => send(res, () => InvoiceService.sharedLedger(req.user.business_id)),
   get: (req, res) => send(res, () => InvoiceService.get(req.params.id, req.user.business_id)),
   create: (req, res) => send(res, () => InvoiceService.create(req.user, req.body), 201),
+  update: (req, res) => send(res, () => InvoiceService.update(req.params.id, req.user, req.body)),
   delete: (req, res) => send(res, () => InvoiceService.delete(req.params.id, req.user)),
 };
