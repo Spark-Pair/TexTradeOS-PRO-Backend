@@ -24,11 +24,19 @@ UninstallDisplayIcon={app}\TexTradeOS.exe
 [Files]
 Source: "..\artifacts\launcher\TexTradeOS.exe"; DestDir: "{app}"; Flags: ignoreversion
 
+; The launcher runs as the signed-in user and stores its runtime files in
+; ProgramData. Grant local users inherited modify access so the first launch
+; can create certificates, configuration, logs, and database files even when
+; setup was run by a different administrator account.
+[Dirs]
+Name: "{commonappdata}\TexTradeOS"; Permissions: users-modify; Flags: uninsneveruninstall
+
 [Icons]
 Name: "{autodesktop}\TexTradeOS PRO"; Filename: "{app}\TexTradeOS.exe"
 Name: "{group}\TexTradeOS PRO"; Filename: "{app}\TexTradeOS.exe"
 
 [Run]
+Filename: "{sys}\icacls.exe"; Parameters: """{commonappdata}\TexTradeOS"" /grant *S-1-5-32-545:(OI)(CI)M /T /C"; Flags: runhidden waituntilterminated; StatusMsg: "Applying TexTradeOS folder permissions..."
 Filename: "{app}\TexTradeOS.exe"; Description: "Launch TexTradeOS PRO"; Flags: nowait postinstall skipifsilent
 
 [Code]
