@@ -12,20 +12,29 @@ const partyConfig = (kind) => {
 };
 
 const num = (value) => Number(value || 0);
+const balanceEntryTotals = (businessId, entityType, id) => {
+  const row = db.prepare(`SELECT
+    COALESCE(SUM(CASE WHEN direction='debit' THEN amount ELSE 0 END),0) debit,
+    COALESCE(SUM(CASE WHEN direction='credit' THEN amount ELSE 0 END),0) credit
+    FROM balance_entries WHERE business_id=? AND entity_type=? AND entity_id=?`).get(businessId, entityType, String(id));
+  return { debit: num(row?.debit), credit: num(row?.credit) };
+};
 
 const customerBalance = (businessId, id) => {
   const invoices = num(db.prepare("SELECT COALESCE(SUM(net_amount),0) amount FROM invoices WHERE business_id=? AND customer_id=?").get(businessId, String(id))?.amount);
   const payments = num(db.prepare("SELECT COALESCE(SUM(ip.amount),0) amount FROM invoice_payments ip JOIN invoices i ON i.id=ip.invoice_id WHERE ip.business_id=? AND i.customer_id=?").get(businessId, String(id))?.amount);
   const directPayments = num(db.prepare("SELECT COALESCE(SUM(amount),0) amount FROM party_payments WHERE business_id=? AND party_type='customer' AND party_id=?").get(businessId, String(id))?.amount);
   const returns = num(db.prepare("SELECT COALESCE(SUM(total_amount),0) amount FROM returns WHERE business_id=? AND return_type='sales' AND party_id=?").get(businessId, String(id))?.amount);
-  return { charges: invoices, credits: payments + directPayments + returns, balance: invoices - payments - directPayments - returns };
+  const entries = balanceEntryTotals(businessId, "customer", id);
+  return { charges: invoices + entries.debit, credits: payments + directPayments + returns + entries.credit, balance: invoices - payments - directPayments - returns + entries.debit - entries.credit };
 };
 
 const supplierBalance = (businessId, id) => {
   const purchases = num(db.prepare("SELECT COALESCE(SUM(total_amount),0) amount FROM purchases WHERE business_id=? AND supplier_id=?").get(businessId, String(id))?.amount);
   const returns = num(db.prepare("SELECT COALESCE(SUM(total_amount),0) amount FROM returns WHERE business_id=? AND return_type='purchase' AND party_id=?").get(businessId, String(id))?.amount);
   const payments = num(db.prepare("SELECT COALESCE(SUM(amount),0) amount FROM party_payments WHERE business_id=? AND party_type='supplier' AND party_id=?").get(businessId, String(id))?.amount);
-  return { charges: purchases, credits: returns + payments, balance: purchases - returns - payments };
+  const entries = balanceEntryTotals(businessId, "supplier", id);
+  return { charges: purchases + entries.debit, credits: returns + payments + entries.credit, balance: purchases - returns - payments + entries.debit - entries.credit };
 };
 
 export const getPartyBalance = (kind, businessId, id) => kind === "customers" ? customerBalance(businessId, id) : supplierBalance(businessId, id);
@@ -36,12 +45,14 @@ const allLedgerRows = (kind, businessId, id) => {
     const payments = db.prepare(`SELECT ip.id,ip.payment_date date,i.invoice_number reference,ip.amount,ip.method,ip.reference_no,ip.notes FROM invoice_payments ip JOIN invoices i ON i.id=ip.invoice_id WHERE ip.business_id=? AND i.customer_id=?`).all(businessId, String(id)).map((r) => ({ ...r, type: "payment", description: `Payment Received${r.method ? ` · ${r.method}` : ""}`, debit: 0, credit: num(r.amount) }));
     const directPayments = db.prepare("SELECT id,payment_date date,reference_no reference,amount,method,reference_no,bank_name,cheque_date,slip_date,notes FROM party_payments WHERE business_id=? AND party_type='customer' AND party_id=?").all(businessId, String(id)).map((r) => ({ ...r, type: "customer_payment", description: `Payment Received${r.method ? ` - ${r.method}` : ""}`, debit: 0, credit: num(r.amount) }));
     const returns = db.prepare("SELECT id,return_date date,return_number reference,total_amount amount,total_pcs,notes FROM returns WHERE business_id=? AND return_type='sales' AND party_id=?").all(businessId, String(id)).map((r) => ({ ...r, type: "sales_return", description: "Sales Return", debit: 0, credit: num(r.amount) }));
-    return [...invoices, ...payments, ...directPayments, ...returns];
+    const entries = db.prepare("SELECT id,entry_date date,reference,entry_type,direction,amount,description,notes FROM balance_entries WHERE business_id=? AND entity_type='customer' AND entity_id=?").all(businessId, String(id)).map((r) => ({ ...r, type: "balance_entry", method: r.entry_type, debit: r.direction === "debit" ? num(r.amount) : 0, credit: r.direction === "credit" ? num(r.amount) : 0 }));
+    return [...invoices, ...payments, ...directPayments, ...returns, ...entries];
   }
   const purchases = db.prepare("SELECT id,purchase_date date,purchase_number reference,total_amount amount,article_count,packet_count,notes FROM purchases WHERE business_id=? AND supplier_id=?").all(businessId, String(id)).map((r) => ({ ...r, type: "purchase", description: "Purchase", debit: num(r.amount), credit: 0 }));
   const returns = db.prepare("SELECT id,return_date date,return_number reference,total_amount amount,total_pcs,stock_action,notes FROM returns WHERE business_id=? AND return_type='purchase' AND party_id=?").all(businessId, String(id)).map((r) => ({ ...r, type: "purchase_return", description: r.stock_action === "keep_goods" ? "Supplier Allowance / Keep Goods" : "Purchase Return", debit: 0, credit: num(r.amount) }));
   const payments = db.prepare("SELECT id,payment_date date,reference_no reference,amount,method,reference_no,bank_name,cheque_date,slip_date,notes FROM party_payments WHERE business_id=? AND party_type='supplier' AND party_id=?").all(businessId, String(id)).map((r) => ({ ...r, type: "supplier_payment", description: `Payment Paid${r.method ? ` - ${r.method}` : ""}`, debit: 0, credit: num(r.amount) }));
-  return [...purchases, ...returns, ...payments];
+  const entries = db.prepare("SELECT id,entry_date date,reference,entry_type,direction,amount,description,notes FROM balance_entries WHERE business_id=? AND entity_type='supplier' AND entity_id=?").all(businessId, String(id)).map((r) => ({ ...r, type: "balance_entry", method: r.entry_type, debit: r.direction === "debit" ? num(r.amount) : 0, credit: r.direction === "credit" ? num(r.amount) : 0 }));
+  return [...purchases, ...returns, ...payments, ...entries];
 };
 
 export const getPartyLedger = (kind, businessId, id, filters = {}) => {

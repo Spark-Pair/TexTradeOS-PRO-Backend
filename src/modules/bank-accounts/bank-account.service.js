@@ -1,11 +1,11 @@
 import crypto from "node:crypto";
 import { db } from "../../db/connection.js";
-import { getBankAccount, listBankAccounts, saveBankAccount, setBankAccountStatus } from "./bank-account.model.js";
+import { getBankAccount, getBankAccountBalance, getBankAccountLedger, listBankAccounts, saveBankAccount, setBankAccountStatus } from "./bank-account.model.js";
 
 const text = (value) => String(value ?? "").trim();
 const categories = new Set(["customer", "supplier", "self"]);
 const notFound = Object.assign(new Error("Bank account not found"), { statusCode: 404 });
-const dto = (row) => row && ({ _id: row.id, category: row.category, party_id: row.party_id || "", party_name: row.party_name || "", account_title: row.account_title, account_no: row.account_no || "", bank_name: row.bank_name || "", cheque_serial_start: row.cheque_serial_start || "", cheque_serial_end: row.cheque_serial_end || "", isActive: Boolean(row.is_active), createdAt: row.created_at, updatedAt: row.updated_at });
+const dto = (row) => row && ({ _id: row.id, category: row.category, party_id: row.party_id || "", party_name: row.party_name || "", account_title: row.account_title, account_no: row.account_no || "", bank_name: row.bank_name || "", cheque_serial_start: row.cheque_serial_start || "", cheque_serial_end: row.cheque_serial_end || "", balance: getBankAccountBalance(row.business_id, row.id), isActive: Boolean(row.is_active), createdAt: row.created_at, updatedAt: row.updated_at });
 const validate = (payload = {}) => {
   const category = text(payload.category).toLowerCase();
   const accountTitle = text(payload.account_title);
@@ -24,6 +24,11 @@ const validate = (payload = {}) => {
 };
 
 export const listBankAccountDtos = (businessId) => listBankAccounts(businessId).map(dto);
+export const getBankAccountStatement = (businessId, id, filters = {}) => {
+  const statement = getBankAccountLedger(businessId, id, filters);
+  if (!statement) throw notFound;
+  return statement;
+};
 export const createBankAccount = (businessId, payload = {}) => { const values = validate({ ...payload, business_id: businessId }); const now = new Date().toISOString(); return dto(saveBankAccount({ ...values, id: crypto.randomUUID(), business_id: businessId, is_active: payload.isActive ?? true, created_at: now, updated_at: now })); };
 export const updateBankAccount = (businessId, id, payload = {}) => { const existing = getBankAccount(businessId, id); if (!existing) throw notFound; const values = validate({ ...payload, business_id: businessId }); return dto(saveBankAccount({ ...values, id: existing.id, business_id: businessId, is_active: payload.isActive ?? Boolean(existing.is_active), created_at: existing.created_at, updated_at: new Date().toISOString() })); };
 export const toggleBankAccount = (businessId, id) => { const existing = getBankAccount(businessId, id); if (!existing) throw notFound; return dto(setBankAccountStatus(businessId, id, !existing.is_active, new Date().toISOString())); };
